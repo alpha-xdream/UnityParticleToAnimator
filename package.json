@@ -1,0 +1,12 @@
+{
+    "name": "com.alphaxdream.particle2animator",
+    "version": "1.0.0",
+    "displayName": "ParticleToAnimator",
+    "description": "",
+    "keywords": ["particle", "particlesystem", "animator", "animation"],
+    "author": {
+        "name": "AlphaXdream",
+        "email": "lin.xr@foxmail.com",
+        "url": "https://github.com/alpha-xdream"
+    }
+}
