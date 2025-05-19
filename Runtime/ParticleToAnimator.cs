@@ -12,6 +12,8 @@ public class ParticleToAnimator : MonoBehaviour
     [Header("Settings")]
     public float frameRate = 30;        // 帧速率
 
+#if UNITY_EDITOR
+
     // 粒子数据存储结构
     private class ParticleData
     {
@@ -31,7 +33,6 @@ public class ParticleToAnimator : MonoBehaviour
     }
 
     private List<ParticleSystem> psList = new List<ParticleSystem>();
-    //private ParticleSystemRenderer psRenderer;
     private Dictionary<string, ParticleData> recordedData = new Dictionary<string, ParticleData>();
     private bool isRecording;
     private float startTime;
@@ -41,11 +42,6 @@ public class ParticleToAnimator : MonoBehaviour
 
     ParticleSystem.Particle[] tempParticles = new ParticleSystem.Particle[5];
 
-
-    private void Start()
-    {
-
-    }
 
     void OnEnable()
     {
@@ -206,7 +202,6 @@ public class ParticleToAnimator : MonoBehaviour
     {
         if (!isRecording) return;
 
-        Debug.Log($"curTime:{startTime}");
         foreach (var ps in psList)
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
@@ -221,7 +216,7 @@ public class ParticleToAnimator : MonoBehaviour
                 if (TempTrans == null)
                 {
                     TempTrans = new GameObject("TempTrans").transform;
-                    TempTrans.gameObject.hideFlags = HideFlags.DontSave;
+                    TempTrans.gameObject.hideFlags = HideFlags.HideAndDontSave;
                     TempChildTrans = new GameObject("TempChild").transform;
                     TempChildTrans.SetParent(TempTrans, false);
                 }
@@ -324,14 +319,61 @@ public class ParticleToAnimator : MonoBehaviour
     // 生成动画资源
     void GenerateAnimation()
     {
-#if UNITY_EDITOR
         var newGo = new GameObject();
         newGo.name = $"{gameObject.name}-Baked";
+        newGo.transform.position = transform.position;
+        newGo.transform.localRotation = transform.localRotation;
+        newGo.transform.localScale = transform.localScale;
 
-        // 创建Animation Clip
-        AnimationClip clip = new AnimationClip();
-        clip.name = gameObject.name + " - BakedAnimation";
+        var animtor = GetComponent<Animator>();
+        AnimationClip clip = animtor == null ? new AnimationClip() : Instantiate(animtor.runtimeAnimatorController.animationClips[0]);
+        clip.name = gameObject.name + "-BakedAnimation";
         clip.frameRate = frameRate;
+
+
+        #region 复制Renderer
+        var renderers = GetComponentsInChildren<Renderer>();
+        foreach (var renderer in renderers)
+        {
+            if (renderer is ParticleSystemRenderer) continue;
+
+            if (renderer.transform != transform)
+            {
+                var newRenderGO = new GameObject(renderer.name);
+                newRenderGO.AddComponent<MeshFilter>().sharedMesh = renderer.GetComponent<MeshFilter>().sharedMesh;
+                newRenderGO.AddComponent<MeshRenderer>().sharedMaterial = renderer.sharedMaterial;
+
+                var _path = GetRelativePath(transform, renderer.transform.parent);
+                var t = newGo.transform;
+                var originT = transform;
+                foreach (var childName in _path.Split('/'))
+                {
+                    var child = t.Find(childName);
+                    var originChild = originT.Find(childName);
+                    if (child == null)
+                    {
+                        child = new GameObject(childName).transform;
+                        child.SetParent(t);
+                        child.localPosition = originChild.localPosition;
+                        child.localRotation = originChild.localRotation;
+                        child.localScale = originChild.localScale;
+                    }
+                    t = child;
+                    originT = originChild;
+                }
+                newRenderGO.transform.SetParent(newGo.transform.Find(_path));
+                newRenderGO.transform.localPosition = renderer.transform.localPosition;
+                newRenderGO.transform.localRotation = renderer.transform.localRotation;
+                newRenderGO.transform.localScale = renderer.transform.localScale;
+            }
+            else
+            {
+                newGo.AddComponent<MeshFilter>().sharedMesh = renderer.GetComponent<MeshFilter>().sharedMesh;
+                newGo.AddComponent<MeshRenderer>().sharedMaterial = renderer.sharedMaterial;
+            }
+        }
+        #endregion
+
         // 填充数据
         foreach (var p in recordedData)
         {
@@ -398,7 +440,6 @@ public class ParticleToAnimator : MonoBehaviour
                 test.transform.localScale = Vector3.one;
             }
             #endregion
-
 
             foreach (RecordedData data in datas.recordedData)
             {
@@ -471,7 +512,6 @@ public class ParticleToAnimator : MonoBehaviour
             clip.SetCurve(path, typeof(Transform), "localPosition.y", posY);
             clip.SetCurve(path, typeof(Transform), "localPosition.z", posZ);
 
-            //RecordTextureSheetAnimator(ps, particle);
             clip.SetCurve(path, typeof(Transform), "localEulerAngles.x", rotX);
             clip.SetCurve(path, typeof(Transform), "localEulerAngles.y", rotY);
             clip.SetCurve(path, typeof(Transform), "localEulerAngles.z", rotZ);
@@ -505,6 +545,7 @@ public class ParticleToAnimator : MonoBehaviour
         newGo.AddComponent<Animator>().runtimeAnimatorController = controller;
 
         Debug.Log("Animation baked successfully!");
-#endif
     }
+#endif
 }
+
