@@ -186,6 +186,21 @@ public class ParticleToAnimator : MonoBehaviour
         return $"{name}-{number}";
     }
 
+    Color GetMainColor(Material material, out string propertyName)
+    {
+        var checkList = new string[] { "_Color", "_TintColor" };
+        foreach(var name in checkList)
+        {
+            if (material.HasProperty(name))
+            {
+                propertyName = name;
+                return material.GetColor(name);
+            }
+        }
+        propertyName = "";
+        return Color.white;
+    }
+
     // 记录单帧数据
     void RecordParticleData()
     {
@@ -196,7 +211,7 @@ public class ParticleToAnimator : MonoBehaviour
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
-            var originColor = psRenderer.sharedMaterial.HasColor("_Color") ? psRenderer.sharedMaterial.GetColor("_Color") : psRenderer.sharedMaterial.GetColor("_TintColor");
+            var originColor = GetMainColor(psRenderer.sharedMaterial, out _);
             ps.Simulate(deltaTime, true, false);
             int num = ps.GetParticles(tempParticles);
             for (int i = 0; i < num; i++)
@@ -243,14 +258,14 @@ public class ParticleToAnimator : MonoBehaviour
                 }
 
                 var name = GetParticleName(ps.name, i);
-                path = path == "" ? name : path + "/" + name;
-                if (recordedData.TryGetValue(path, out var particleData))
+                string animPath = path == "" ? name : path + "/" + name;
+                if (recordedData.TryGetValue(animPath, out var particleData))
                 {
                     particleData.recordedData.Add(data);
                 }
                 else
                 {
-                    recordedData.Add(path, new ParticleData()
+                    recordedData.Add(animPath, new ParticleData()
                     {
                         name = name,
                         ps = ps,
@@ -357,18 +372,21 @@ public class ParticleToAnimator : MonoBehaviour
             {
                 var _path = GetRelativePath(transform, ps.transform);
                 var t = newGo.transform;
+                var originT = transform;
                 foreach (var childName in _path.Split('/'))
                 {
                     var child = t.Find(childName);
+                    var originChild = originT.Find(childName);
                     if (child == null)
                     {
                         child = new GameObject(childName).transform;
                         child.SetParent(t);
-                        child.localPosition = ps.transform.localPosition;
-                        child.localRotation = ps.transform.localRotation;
-                        child.localScale = ps.transform.localScale;
+                        child.localPosition = originChild.localPosition;
+                        child.localRotation = originChild.localRotation;
+                        child.localScale = originChild.localScale;
                     }
                     t = child;
+                    originT = originChild;
                 }
                 test.transform.SetParent(newGo.transform.Find(_path));
             }
@@ -462,11 +480,11 @@ public class ParticleToAnimator : MonoBehaviour
             clip.SetCurve(path, typeof(Transform), "localScale.y", scaleY);
             clip.SetCurve(path, typeof(Transform), "localScale.z", scaleZ);
 
-            var colorKey = psRenderer.sharedMaterial.HasColor("_Color") ? "material._Color" : "material._TintColor";
-            clip.SetCurve(path, typeof(MeshRenderer), $"{colorKey}.r", colorR);
-            clip.SetCurve(path, typeof(MeshRenderer), $"{colorKey}.g", colorG);
-            clip.SetCurve(path, typeof(MeshRenderer), $"{colorKey}.b", colorB);
-            clip.SetCurve(path, typeof(MeshRenderer), $"{colorKey}.a", colorA);
+            GetMainColor(psRenderer.sharedMaterial, out var colorKey);
+            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.r", colorR);
+            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.g", colorG);
+            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.b", colorB);
+            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.a", colorA);
 
             clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.x", texScaleX);
             clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.y", texScaleY);
