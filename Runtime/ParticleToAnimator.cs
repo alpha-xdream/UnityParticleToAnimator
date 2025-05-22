@@ -1,6 +1,8 @@
 ﻿using UnityEngine;
 using System.Collections.Generic;
 using System.Collections;
+using System.IO;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -11,6 +13,10 @@ public class ParticleToAnimator : MonoBehaviour
 {
     [Header("Settings")]
     public float frameRate = 30;        // 帧速率
+    public float colorScale = 2f; // 颜色缩放
+    public List<GameObject> excludes = new List<GameObject>();
+
+    private const string OUTPUT = "Assets/ParticleToAnimatorOutput";
 
 #if UNITY_EDITOR
 
@@ -40,7 +46,7 @@ public class ParticleToAnimator : MonoBehaviour
     private Transform TempChildTrans;
     private float deltaTime;
 
-    ParticleSystem.Particle[] tempParticles = new ParticleSystem.Particle[5];
+    ParticleSystem.Particle[] tempParticles = new ParticleSystem.Particle[100];
 
 
     void OnEnable()
@@ -74,6 +80,24 @@ public class ParticleToAnimator : MonoBehaviour
         }
     }
 
+    //Transform GetParent(Transform root, Transform child)
+    //{
+
+    //}
+
+    bool CanBaked(Transform check)
+    {
+        while (true)
+        {
+            if (check == transform) return true;
+            if (check.GetComponent<Animator>() != null) return false;
+
+            check = check.parent;
+            if (check.parent == null) break;
+        }
+        return false;
+    }
+
     // 开始记录数据
     void StartRecording()
     {
@@ -81,22 +105,26 @@ public class ParticleToAnimator : MonoBehaviour
         psList.Clear();
 
         float duration = 0f;
+        foreach(var exclude in excludes)
+        {
+            exclude.SetActive(false);
+        }
+
         foreach (var ps in GetComponentsInChildren<ParticleSystem>())
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
-            if (psRenderer.renderMode != ParticleSystemRenderMode.Mesh)
-            {
-                Debug.LogError($"只支持Mesh。忽略{path}");
-                continue;
-            }
+            //if (psRenderer.renderMode != ParticleSystemRenderMode.Mesh)
+            //{
+            //    Debug.LogError($"{path}是非Mesh模式。需要手动将转换后的MeshRenderer换成Billboard材质！");
+            //}
             psList.Add(ps);
-            ps.playOnAwake = false;
-            ps.loop = false;
-            ps.Play(true);
-            ps.Pause(true);
+            ps.Clear(false);
+            ps.Play(false);
+            ps.Pause(false);
             duration = Mathf.Max(duration, ps.main.duration);
         }
+
         isRecording = true;
         startTime = 0f;
         deltaTime = 1f / frameRate;
@@ -211,8 +239,6 @@ public class ParticleToAnimator : MonoBehaviour
             int num = ps.GetParticles(tempParticles);
             for (int i = 0; i < num; i++)
             {
-                var particle = tempParticles[i];
-                var originMesh = psRenderer.mesh;
                 if (TempTrans == null)
                 {
                     TempTrans = new GameObject("TempTrans").transform;
@@ -220,25 +246,53 @@ public class ParticleToAnimator : MonoBehaviour
                     TempChildTrans = new GameObject("TempChild").transform;
                     TempChildTrans.SetParent(TempTrans, false);
                 }
+                var particle = tempParticles[i];
+                var originMesh = psRenderer.mesh;
                 Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
                 TempTrans.SetParent(ps.transform);
                 TempTrans.localPosition = particle.position;
                 TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
                 TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
 
-                pivotOffset.Scale(originMesh.bounds.size);
-                pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
+                if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
+                {
+                    pivotOffset.Scale(originMesh.bounds.size);
+                    pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
+                }
+                else if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
+                {
+                    // pivotOffset相对于视图坐标系的偏移
+                    //var cameraTrans = activeCamera.transform;
+                    //var offsetPos = cameraTrans.InverseTransformPoint(TempTrans.position);
+                    //pivotOffset.z = -pivotOffset.z;
+                    //pivotOffset.Scale(TempTrans.lossyScale);
+                    //offsetPos += pivotOffset;
+                    //pivotOffset = TempTrans.InverseTransformPoint(cameraTrans.TransformPoint(offsetPos));
+                    pivotOffset = Vector3.zero;
+                }
+                else if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
+                {
+                    // z值没有作用
+                    pivotOffset.z = pivotOffset.y * 2;
+                    pivotOffset.y = 0;
+                }
                 TempChildTrans.localPosition = pivotOffset;
-                TempChildTrans.localRotation = Quaternion.identity;
+                TempChildTrans.localRotation = Quaternion.identity; 
                 TempChildTrans.localScale = Vector3.one;
 
+                var position = TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
+                var color = particle.GetCurrentColor(ps) * originColor;
+                if(psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
+                {
+                    color *= colorScale;
+                }
                 RecordedData data = new RecordedData
                 {
                     time = startTime,
-                    position = TempChildTrans.position - TempTrans.position + TempTrans.localPosition,
+                    position = position,
                     rotation = TempTrans.localRotation * TempChildTrans.localRotation,
                     scale = Vector3.Scale(TempChildTrans.localScale, TempTrans.localScale),
-                    color = particle.GetCurrentColor(ps) * originColor
+                    color = color
                 };
 
                 // 获取Renderer材质属性
@@ -302,9 +356,6 @@ public class ParticleToAnimator : MonoBehaviour
     }
 
 
-
-
-
     // Transform
     AnimationCurve
         posX, posY, posZ,
@@ -319,6 +370,9 @@ public class ParticleToAnimator : MonoBehaviour
     // 生成动画资源
     void GenerateAnimation()
     {
+        var savePath = $"{OUTPUT}/{gameObject.name}/";
+        Directory.CreateDirectory(savePath);
+
         var newGo = new GameObject();
         newGo.name = $"{gameObject.name}-Baked";
         newGo.transform.position = transform.position;
@@ -336,6 +390,7 @@ public class ParticleToAnimator : MonoBehaviour
         foreach (var renderer in renderers)
         {
             if (renderer is ParticleSystemRenderer) continue;
+            if (renderer is SkinnedMeshRenderer) continue;
 
             if (renderer.transform != transform)
             {
@@ -357,6 +412,10 @@ public class ParticleToAnimator : MonoBehaviour
                         child.localPosition = originChild.localPosition;
                         child.localRotation = originChild.localRotation;
                         child.localScale = originChild.localScale;
+                        if (originChild.GetComponent<Animator>())
+                        {
+                            child.gameObject.AddComponent<Animator>().runtimeAnimatorController = originChild.GetComponent<Animator>().runtimeAnimatorController;
+                        }
                     }
                     t = child;
                     originT = originChild;
@@ -400,6 +459,7 @@ public class ParticleToAnimator : MonoBehaviour
 
 
             var path = p.Key;
+            var matPath = p.Key;
             var datas = p.Value;
             var name = datas.name;
             var ps = datas.ps;
@@ -408,8 +468,51 @@ public class ParticleToAnimator : MonoBehaviour
             #region 创建模拟粒子的节点
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var test = new GameObject(name);
-            test.AddComponent<MeshFilter>().sharedMesh = psRenderer.mesh;
-            test.AddComponent<MeshRenderer>().sharedMaterial = psRenderer.sharedMaterial;
+            Debug.Log($"test new {name}, psRender:{psRenderer.name}");
+            var newMesh = psRenderer.mesh;
+            var newMaterial = psRenderer.sharedMaterial;
+            if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
+            {
+                newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/QuadMesh.asset");
+                var tempPath = savePath + ps.name + ".mat";
+                if (AssetDatabase.LoadAssetAtPath<Material>(tempPath) == null)
+                {
+                    var temp = new Material(Shader.Find("ParticleToAnimator/ViewBillboard"));
+                    temp.name = $"{transform.name}_{ps.name}";
+                    AssetDatabase.CreateAsset(temp, tempPath);
+                    AssetDatabase.Refresh();
+                    temp.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
+                    temp.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
+                    temp.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
+                    temp.renderQueue = newMaterial.renderQueue;
+                }
+                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempPath);
+                newMaterial.shader = Shader.Find("ParticleToAnimator/ViewBillboard");
+                var pivot = psRenderer.pivot;
+                pivot.z = -pivot.z;
+                newMaterial.SetVector("_Offset", pivot);
+            }
+            else if(psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
+            {
+                newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/StretchMesh.asset");
+                var tempPath = savePath + ps.name + ".mat";
+                if (AssetDatabase.LoadAssetAtPath<Material>(tempPath) == null)
+                {
+                    var temp = new Material(Shader.Find("ParticleToAnimator/StretchedBillboard"));
+                    temp.name = $"{transform.name}_{ps.name}";
+                    temp.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
+                    temp.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
+                    temp.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
+                    temp.renderQueue = newMaterial.renderQueue;
+                    AssetDatabase.CreateAsset(temp, tempPath);
+                    AssetDatabase.Refresh();
+                }
+                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempPath);
+                newMaterial.shader = Shader.Find("ParticleToAnimator/StretchedBillboard");
+            }
+
+            test.AddComponent<MeshFilter>().sharedMesh = newMesh;
+            test.AddComponent<MeshRenderer>().sharedMaterial = newMaterial;
             if (ps.transform != transform)
             {
                 var _path = GetRelativePath(transform, ps.transform);
@@ -435,10 +538,25 @@ public class ParticleToAnimator : MonoBehaviour
             else
             {
                 test.transform.SetParent(newGo.transform);
-                test.transform.localPosition = Vector3.zero;
-                test.transform.localRotation = Quaternion.identity;
-                test.transform.localScale = Vector3.one;
             }
+            test.transform.localPosition = Vector3.zero;
+            test.transform.localRotation = Quaternion.identity;
+            test.transform.localScale = Vector3.one;
+
+            if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
+            {
+                var newParent = new GameObject(test.name);
+                newParent.transform.SetParent(test.transform.parent);
+                newParent.transform.localPosition = Vector3.zero;
+                newParent.transform.localRotation = Quaternion.identity;
+                newParent.transform.localScale = Vector3.one;
+                matPath = matPath + "/" + test.name;
+                test.transform.SetParent(newParent.transform);
+                test.transform.localPosition = Vector3.zero;
+                test.transform.localEulerAngles = new Vector3(90, 0, 0); // 90度旋转适配StretchedBillboard.shader
+                test.transform.localScale = new Vector3(1, psRenderer.lengthScale, 1);
+            }
+
             #endregion
 
             foreach (RecordedData data in datas.recordedData)
@@ -521,31 +639,159 @@ public class ParticleToAnimator : MonoBehaviour
             clip.SetCurve(path, typeof(Transform), "localScale.z", scaleZ);
 
             GetMainColor(psRenderer.sharedMaterial, out var colorKey);
-            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.r", colorR);
-            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.g", colorG);
-            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.b", colorB);
-            clip.SetCurve(path, typeof(MeshRenderer), $"material.{colorKey}.a", colorA);
+            clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.r", colorR);
+            clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.g", colorG);
+            clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.b", colorB);
+            clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.a", colorA);
 
-            clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.x", texScaleX);
-            clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.y", texScaleY);
-            clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.z", texOffsetX);
-            clip.SetCurve(path, typeof(MeshRenderer), "material._MainTex_ST.w", texOffsetY);
+            clip.SetCurve(matPath, typeof(MeshRenderer), "material._MainTex_ST.x", texScaleX);
+            clip.SetCurve(matPath, typeof(MeshRenderer), "material._MainTex_ST.y", texScaleY);
+            clip.SetCurve(matPath, typeof(MeshRenderer), "material._MainTex_ST.z", texOffsetX);
+            clip.SetCurve(matPath, typeof(MeshRenderer), "material._MainTex_ST.w", texOffsetY);
 
         }
-        var clipPath = $"Assets/{clip.name}.anim";// AssetDatabase.GenerateUniqueAssetPath($"Assets/{clip.name}.anim");
+        var clipPath = $"{savePath}{clip.name}.anim";// AssetDatabase.GenerateUniqueAssetPath($"Assets/{clip.name}.anim");
         AssetDatabase.CreateAsset(clip, clipPath);
         AssetDatabase.Refresh();
 
         // 创建Animator Controller
-        string controllerPath = "Assets/Generated.controller";
+        string controllerPath = $"{savePath}{transform.name}.controller";
         AnimatorController controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
         controller.AddMotion(clip);
         AssetDatabase.Refresh();
 
         newGo.AddComponent<Animator>().runtimeAnimatorController = controller;
+        PrefabUtility.SaveAsPrefabAsset(newGo, $"{savePath}{transform.name}.prefab");
 
         Debug.Log("Animation baked successfully!");
     }
+
+
+    #region Gizmos
+
+    void OnDrawGizmos()
+    {
+        if (!Application.isPlaying || isRecording) return;
+
+        foreach (var ps in GetComponentsInChildren<ParticleSystem>())
+        {
+            var num = ps.GetParticles(tempParticles);
+            var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
+            for (int i = 0; i < num; i++)
+            {
+                Gizmos.color = Color.green;
+                if (TempTrans == null)
+                {
+                    TempTrans = new GameObject("TempTrans").transform;
+                    //TempTrans.gameObject.hideFlags = HideFlags.HideAndDontSave;
+                    TempChildTrans = new GameObject("TempChild").transform;
+                    TempChildTrans.SetParent(TempTrans, false);
+                }
+                var particle = tempParticles[i];
+                var originMesh = psRenderer.mesh;
+                Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
+                TempTrans.SetParent(ps.transform);
+                TempTrans.localPosition = particle.position;
+                TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
+                TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
+
+
+                if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
+                {
+                    pivotOffset.Scale(originMesh.bounds.size);
+                    pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
+                }
+                else if(psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
+                {
+                    // pivotOffset相对于视图坐标系的偏移
+                    var cameraTrans = Camera.current.transform;
+                    var offsetPos = cameraTrans.InverseTransformPoint(TempTrans.position);
+                    pivotOffset.z = -pivotOffset.z;
+                    pivotOffset.Scale(TempTrans.lossyScale);
+                    offsetPos += pivotOffset;
+                    pivotOffset = TempTrans.InverseTransformPoint(cameraTrans.TransformPoint(offsetPos));
+                }
+                else if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
+                {
+                    // z值没有作用
+                    pivotOffset.z = pivotOffset.y * 2;
+                    pivotOffset.y = 0;
+                }
+                TempChildTrans.localPosition = pivotOffset;
+                TempChildTrans.localRotation = Quaternion.identity;
+                TempChildTrans.localScale = Vector3.one;
+
+                var realPos = TempChildTrans.position - TempTrans.position + TempTrans.localPosition;
+                Gizmos.DrawWireSphere(TempChildTrans.position, 0.1f);
+                Gizmos.DrawRay(TempChildTrans.position, particle.velocity);
+
+                //DrawStretchedGizmos(ps, particle);
+            }
+        }
+    }
+
+    static Mesh stretchedMeshGizmos;
+    void DrawStretchedGizmos(ParticleSystem ps, ParticleSystem.Particle p)
+    {
+        var renderer = ps.GetComponent<ParticleSystemRenderer>();
+        Vector3 pos = p.position;
+        Vector3 vel = p.velocity;
+        float w = p.size;
+
+        // 1. 方向与基准
+        Vector3 dir = vel.magnitude > 1e-6f ? vel.normalized : Vector3.forward;
+        Vector3 camF = SceneView.currentDrawingSceneView.camera.transform.forward;
+        Vector3 camV = SceneView.currentDrawingSceneView.camera.velocity;
+
+        // 2. 计算三重拉伸
+        float L_cam = renderer.cameraVelocityScale * Vector3.Dot(camV, dir);
+        float L_vel = renderer.velocityScale * vel.magnitude;
+        float L_base = renderer.lengthScale * w;
+        float length = L_base + L_vel + L_cam;
+
+        // 3. 自由拉伸修正
+        //if (!renderer.freeformStretching)
+        //{
+        //    float align = Mathf.Abs(Vector3.Dot(dir, camF));
+        //    length *= (1 - align);  // 面向时变细
+        //}
+        float align = Mathf.Abs(Vector3.Dot(dir, camF));
+        length *= (1 - align);  // 面向时变细
+
+        // 4. 半幅向量
+        Vector3 halfLen = dir * (length * 0.5f);
+        Vector3 right = Vector3.Cross(camF, dir).normalized;
+        Vector3 halfWid = right * (w * 0.5f);
+
+        // 5. 顶点位置
+        Vector3[] quad = new Vector3[4];
+        quad[0] = halfLen + halfWid;
+        quad[1] = halfLen - halfWid;
+        quad[2] = -halfLen - halfWid;
+        quad[3] = -halfLen + halfWid;
+
+        // 6. 可选：绕 dir 轴额外旋转
+        //if (renderer.rotateWithStretchDirection)
+        //{
+        //    Quaternion rot = Quaternion.FromToRotation(Vector3.forward, dir);
+        //    for (int i = 0; i < 4; ++i)
+        //        quad[i] = pos + rot * (quad[i] - pos);
+        //}
+        if (stretchedMeshGizmos == null) stretchedMeshGizmos = new Mesh();
+        stretchedMeshGizmos.vertices = new Vector3[] { quad[0], quad[1], quad[2], quad[3] };
+        stretchedMeshGizmos.triangles = new int[] { 0, 1, 2, 0, 2, 3 };
+        stretchedMeshGizmos.RecalculateNormals();
+        stretchedMeshGizmos.RecalculateBounds();
+
+        Gizmos.color = Color.red;
+        foreach (var q in quad)
+        {
+            Gizmos.DrawWireSphere(q + pos, 0.1f);
+        }
+    }
+
+    #endregion
+
 #endif
 }
 
