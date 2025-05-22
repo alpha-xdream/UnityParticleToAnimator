@@ -272,9 +272,8 @@ public class ParticleToAnimator : MonoBehaviour
                 }
                 else if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
                 {
-                    // z值没有作用
-                    pivotOffset.z = pivotOffset.y * 2;
-                    pivotOffset.y = 0;
+                    if(ps.shape.enabled && pivotOffset != Vector3.zero) Debug.LogError($"StretchedBillboard暂时不支持Shape和Pivot同时使用");
+                    pivotOffset = Vector3.zero;
                 }
                 TempChildTrans.localPosition = pivotOffset;
                 TempChildTrans.localRotation = Quaternion.identity; 
@@ -509,6 +508,9 @@ public class ParticleToAnimator : MonoBehaviour
                 }
                 newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempPath);
                 newMaterial.shader = Shader.Find("ParticleToAnimator/StretchedBillboard");
+                var pivot = psRenderer.pivot;
+                pivot.z = 0;
+                newMaterial.SetVector("_Offset", pivot);
             }
 
             test.AddComponent<MeshFilter>().sharedMesh = newMesh;
@@ -671,7 +673,7 @@ public class ParticleToAnimator : MonoBehaviour
 
     void OnDrawGizmos()
     {
-        if (!Application.isPlaying || isRecording) return;
+        //if (!Application.isPlaying || isRecording) return;
 
         foreach (var ps in GetComponentsInChildren<ParticleSystem>())
         {
@@ -716,6 +718,8 @@ public class ParticleToAnimator : MonoBehaviour
                     // z值没有作用
                     pivotOffset.z = pivotOffset.y * 2;
                     pivotOffset.y = 0;
+
+                    pivotOffset = Vector3.zero; // test
                 }
                 TempChildTrans.localPosition = pivotOffset;
                 TempChildTrans.localRotation = Quaternion.identity;
@@ -723,7 +727,7 @@ public class ParticleToAnimator : MonoBehaviour
 
                 var realPos = TempChildTrans.position - TempTrans.position + TempTrans.localPosition;
                 Gizmos.DrawWireSphere(TempChildTrans.position, 0.1f);
-                Gizmos.DrawRay(TempChildTrans.position, particle.velocity);
+                Gizmos.DrawRay(TempChildTrans.position, particle.axisOfRotation);
 
                 //DrawStretchedGizmos(ps, particle);
             }
@@ -777,11 +781,6 @@ public class ParticleToAnimator : MonoBehaviour
         //    for (int i = 0; i < 4; ++i)
         //        quad[i] = pos + rot * (quad[i] - pos);
         //}
-        if (stretchedMeshGizmos == null) stretchedMeshGizmos = new Mesh();
-        stretchedMeshGizmos.vertices = new Vector3[] { quad[0], quad[1], quad[2], quad[3] };
-        stretchedMeshGizmos.triangles = new int[] { 0, 1, 2, 0, 2, 3 };
-        stretchedMeshGizmos.RecalculateNormals();
-        stretchedMeshGizmos.RecalculateBounds();
 
         Gizmos.color = Color.red;
         foreach (var q in quad)

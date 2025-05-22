@@ -25,13 +25,21 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Floats:
     - _Brightness: 2
+    - _Cull: 0
     - _Distance: 1.04
+    - _DstBlend: 10
     - _FogFactor: 1
     - _IsPlane: 0
+    - _Mode: 1
     - _OffsetHeight: 0
     - _OffsetScaleX: 0
     - _OffsetScaleY: 0
+    - _RenderQueue: 3000
+    - _SrcBlend: 5
     - _VerticalBillboarding: 0
+    - _ZTest: 4
+    - _ZWrite: 0
     m_Colors:
     - _CameraOriginPos: {r: 0, g: 0, b: 0, a: 0}
-    - _TintColor: {r: 1, g: 1, b: 1, a: 1}
+    - _Offset: {r: 1, g: 0, b: 0, a: 0}
+    - _TintColor: {r: 1, g: 0, b: 0, a: 1}
