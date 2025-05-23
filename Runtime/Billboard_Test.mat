@@ -36,10 +36,11 @@ Material:
     - _OffsetScaleY: 0
     - _RenderQueue: 3000
     - _SrcBlend: 5
+    - _Stretch: 0
     - _VerticalBillboarding: 0
     - _ZTest: 4
     - _ZWrite: 0
     m_Colors:
     - _CameraOriginPos: {r: 0, g: 0, b: 0, a: 0}
-    - _Offset: {r: 1, g: 0, b: 0, a: 0}
+    - _Offset: {r: 1, g: 4, b: 0, a: 0}
     - _TintColor: {r: 1, g: 0, b: 0, a: 1}
