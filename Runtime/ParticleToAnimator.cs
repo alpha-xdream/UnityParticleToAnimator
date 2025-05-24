@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections;
 using System.IO;
 
-
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Animations;
@@ -23,6 +22,9 @@ public class ParticleToAnimator : MonoBehaviour
     // 粒子数据存储结构
     private class ParticleData
     {
+        // 记录粒子的唯一id。ps.GetParticles获取到的粒子是按生成顺序排序的。如果当前帧有2个粒子，下一帧变成1个粒子，那么index为0的粒子会是上一帧index为1的粒子。
+        public int id;
+        public int frame; // 设置id时的时间
         public string name;
         public ParticleSystem ps;
         public ParticleSystem.Particle particle;
@@ -38,10 +40,23 @@ public class ParticleToAnimator : MonoBehaviour
         public Vector4 textureOffset;
     }
 
+    private class ParticleIdData
+    {
+        internal class IdData
+        {
+            public int count; // 获取id的次数。 每轮重置
+            public List<int> ids = new List<int>();
+        }
+        public int nextId;
+        public Dictionary<int, IdData> data = new Dictionary<int, IdData>();
+    }
+
     private List<ParticleSystem> psList = new List<ParticleSystem>();
     private Dictionary<string, ParticleData> recordedData = new Dictionary<string, ParticleData>();
+    private Dictionary<ParticleSystem, ParticleIdData> particleIds = new Dictionary<ParticleSystem, ParticleIdData>();
     private bool isRecording;
     private float startTime;
+    private int startFrame;
     private Transform TempTrans;
     private Transform TempChildTrans;
     private float deltaTime;
@@ -49,15 +64,20 @@ public class ParticleToAnimator : MonoBehaviour
     ParticleSystem.Particle[] tempParticles = new ParticleSystem.Particle[100];
 
 
-    void OnEnable()
+    public void StartBaked()
     {
+        if (!isActiveAndEnabled)
+        {
+            Debug.LogError("请先启用ParticleToAnimator");
+            return;
+        }
+        if (!Application.isPlaying)
+        {
+            Debug.LogError("请先运行游戏");
+            return;
+        }
         StartRecording();
     }
-
-    //void OnDisable()
-    //{
-    //
-    //}
 
     void OnDestroy()
     {
@@ -70,33 +90,12 @@ public class ParticleToAnimator : MonoBehaviour
 
     void Update()
     {
-        if (isRecording && Application.isPlaying)
-        {
-            //foreach (var ps in psList)
-            //{
-            //    ps.Simulate(Time.deltaTime, true, false);
-            //}
-            RecordParticleData();
-        }
+        //if (isRecording && Application.isPlaying)
+        //{
+        //    RecordParticleData();
+        //}
     }
 
-    //Transform GetParent(Transform root, Transform child)
-    //{
-
-    //}
-
-    bool CanBaked(Transform check)
-    {
-        while (true)
-        {
-            if (check == transform) return true;
-            if (check.GetComponent<Animator>() != null) return false;
-
-            check = check.parent;
-            if (check.parent == null) break;
-        }
-        return false;
-    }
 
     void ShowProgressBar(float progress)
     {
@@ -109,6 +108,7 @@ public class ParticleToAnimator : MonoBehaviour
         ShowProgressBar(0f);
         recordedData.Clear();
         psList.Clear();
+        particleIds.Clear();
 
         float duration = 0f;
         foreach(var exclude in excludes)
@@ -118,24 +118,29 @@ public class ParticleToAnimator : MonoBehaviour
 
         foreach (var ps in GetComponentsInChildren<ParticleSystem>())
         {
-            var path = $"{GetRelativePath(transform, ps.transform)}";
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
-            //if (psRenderer.renderMode != ParticleSystemRenderMode.Mesh)
-            //{
-            //    Debug.LogError($"{path}是非Mesh模式。需要手动将转换后的MeshRenderer换成Billboard材质！");
-            //}
             psList.Add(ps);
+            ps.Stop(false);
             ps.Clear(false);
             ps.Play(false);
             ps.Pause(false);
-            duration = Mathf.Max(duration, ps.main.duration);
+            duration = Mathf.Max(duration, ps.main.duration * 1.5f); // 还要加上粒子的生存时间。先简单乘以1.5
         }
 
+        Debug.LogError($"duration:{duration}");
+        Debug.LogError($"Start :{Time.time}");
         isRecording = true;
         startTime = 0f;
+        startFrame = 0;
         deltaTime = 1f / frameRate;
-        //InvokeRepeating("RecordParticleData", 0f, deltaTime);
-        StartCoroutine(StartStopRecording(duration));
+        //StartCoroutine(StartStopRecording(duration));
+
+        while(duration >= 0f)
+        {
+            duration -= deltaTime;
+            RecordParticleData();
+        }
+        StopRecording();
     }
 
     IEnumerator StartStopRecording(float t)
@@ -147,6 +152,7 @@ public class ParticleToAnimator : MonoBehaviour
         //}
         RecordParticleData();
         StopRecording();
+        Debug.LogError($"Finished :{Time.time}");
     }
 
     public static Matrix4x4 CalculateTransformationMatrix(
@@ -197,14 +203,14 @@ public class ParticleToAnimator : MonoBehaviour
         return transformationMatrix;
     }
 
-    public static string GetRelativePath(Transform parent, Transform child)
+    public static string GetRelativePath(Transform parent, Transform child, string separator = "/")
     {
         if (parent == child) return "";
         string path = child.name;
         Transform t = child.parent;
         while (t != null && t != parent)
         {
-            path = t.name + "/" + path;
+            path = t.name + separator + path;
             t = t.parent;
         }
         return path;
@@ -218,7 +224,7 @@ public class ParticleToAnimator : MonoBehaviour
 
     Color GetMainColor(Material material, out string propertyName)
     {
-        var checkList = new string[] { "_Color", "_TintColor" };
+        var checkList = new string[] { "_Color", "_TintColor", "_MainTexColor" };
         foreach(var name in checkList)
         {
             if (material.HasProperty(name))
@@ -231,18 +237,65 @@ public class ParticleToAnimator : MonoBehaviour
         return Color.white;
     }
 
+    void ResetParticleCount()
+    {
+        foreach(var p in particleIds)
+        {
+            foreach(var id in p.Value.data)
+            {
+                id.Value.count = 0;
+            }
+        }
+    }
+    int GetParticleId(ParticleSystem ps, ref ParticleSystem.Particle particle)
+    {
+        var remainingLifetime = particle.remainingLifetime;
+        //if (!Mathf.Approximately(0f, (particle.startLifetime - remainingLifetime) % deltaTime))
+        //{
+        //    remainingLifetime = Mathf.Min(particle.startLifetime, particle.remainingLifetime + (ps.startDelay % deltaTime));
+        //}
+
+        int spawnInFrame = startFrame - Mathf.RoundToInt((particle.startLifetime - remainingLifetime) / deltaTime);
+        //Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, spawn:{spawnInFrame}, curFrame:{startFrame}, {particle.startLifetime}, {particle.remainingLifetime}:{remainingLifetime}, delay:{startDelay}");
+        if (Mathf.Abs(particle.startLifetime - remainingLifetime) < deltaTime)
+        {
+            particle.remainingLifetime = particle.startLifetime;
+            if (!particleIds.TryGetValue(ps, out var p))
+            {
+                particleIds[ps] = p = new ParticleIdData();
+            }
+            if(!p.data.TryGetValue(startFrame, out var pIdData))
+            {
+                p.data[startFrame] = pIdData = new ParticleIdData.IdData();
+            }
+
+            var idList = pIdData.ids;
+            idList.Add(p.nextId++);
+
+            //Debug.LogError($"idCount:{idList.Count}");
+            // 按顺序取，不会越界
+            return idList[idList.Count - 1];
+        }
+
+        var data = particleIds[ps].data[spawnInFrame];
+        return data.ids[data.count++];
+    }
+
     // 记录单帧数据
     void RecordParticleData()
     {
         if (!isRecording) return;
+
+        ResetParticleCount();
 
         foreach (var ps in psList)
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var originColor = GetMainColor(psRenderer.sharedMaterial, out _);
-            ps.Simulate(deltaTime, true, false);
+            ps.Simulate(deltaTime, false, false, false);
             int num = ps.GetParticles(tempParticles);
+            //Debug.Log($"num:{num}");
             for (int i = 0; i < num; i++)
             {
                 if (TempTrans == null)
@@ -253,6 +306,10 @@ public class ParticleToAnimator : MonoBehaviour
                     TempChildTrans.SetParent(TempTrans, false);
                 }
                 var particle = tempParticles[i];
+                int id = GetParticleId(ps, ref particle);
+                tempParticles[i] = particle;
+                //Debug.Log($"index:{i}, id:{id}");
+
                 var originMesh = psRenderer.mesh;
                 Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
                 TempTrans.SetParent(ps.transform);
@@ -307,7 +364,7 @@ public class ParticleToAnimator : MonoBehaviour
                     data.textureOffset = CalculateTilingOffset(tsa, particle, new Vector2Int(cols, rows));
                 }
 
-                var name = GetParticleName(ps.name, i);
+                var name = GetParticleName(ps.name, id);
                 string animPath = path == "" ? name : path + "/" + name;
                 if (recordedData.TryGetValue(animPath, out var particleData))
                 {
@@ -317,6 +374,8 @@ public class ParticleToAnimator : MonoBehaviour
                 {
                     recordedData.Add(animPath, new ParticleData()
                     {
+                        id = id,
+                        frame = startFrame,
                         name = name,
                         ps = ps,
                         particle = particle,
@@ -324,9 +383,11 @@ public class ParticleToAnimator : MonoBehaviour
                     });
                 }
             }
+            ps.SetParticles(tempParticles, num);
         }
 
         startTime += deltaTime;
+        startFrame++;
     }
     Vector4 CalculateTilingOffset(ParticleSystem.TextureSheetAnimationModule tsa, ParticleSystem.Particle particle, Vector2Int tileCount)
     {
@@ -357,6 +418,8 @@ public class ParticleToAnimator : MonoBehaviour
         EditorUtility.ClearProgressBar();
     }
 
+    // GameObject
+    AnimationCurve active;
 
     // Transform
     AnimationCurve
@@ -373,7 +436,7 @@ public class ParticleToAnimator : MonoBehaviour
     void GenerateAnimation()
     {
         var savePath = $"{OUTPUT}/{gameObject.name}/";
-        Directory.Delete(savePath, true);
+        if(Directory.Exists(savePath)) Directory.Delete(savePath, true);
         Directory.CreateDirectory(savePath);
         AssetDatabase.Refresh();
 
@@ -440,6 +503,8 @@ public class ParticleToAnimator : MonoBehaviour
         // 填充数据
         foreach (var p in recordedData)
         {
+            // GameObject
+            active = new AnimationCurve();
             // Transform
             posX = new AnimationCurve();
             posY = new AnimationCurve();
@@ -476,47 +541,48 @@ public class ParticleToAnimator : MonoBehaviour
 
             var newMesh = psRenderer.mesh;
             var newMaterial = psRenderer.sharedMaterial;
-            Material temp;
+            Material tempMat;
+            string matName = GetRelativePath(transform, ps.transform, "_");
+            matName = matName == "" ? ps.name  : matName;
+            var tempMatPath = savePath + matName + ".mat";
             if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
             {
                 newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/QuadMesh.asset");
-                var tempPath = savePath + ps.name + ".mat";
-                if (AssetDatabase.LoadAssetAtPath<Material>(tempPath) == null)
+                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
                 {
-                    temp = new Material(Shader.Find("ParticleToAnimator/ViewBillboard"));
-                    temp.name = $"{transform.name}_{ps.name}";
+                    tempMat = new Material(Shader.Find("ParticleToAnimator/ViewBillboard"));
+                    tempMat.name = matName;
                     var pivot = psRenderer.pivot;
                     pivot.z = -pivot.z;
-                    temp.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
-                    temp.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
-                    temp.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
-                    temp.SetVector("_Offset", pivot);
-                    temp.renderQueue = newMaterial.renderQueue;
-                    AssetDatabase.CreateAsset(temp, tempPath);
+                    tempMat.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
+                    tempMat.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
+                    tempMat.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
+                    tempMat.SetVector("_Offset", pivot);
+                    tempMat.renderQueue = newMaterial.renderQueue;
+                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
                     AssetDatabase.Refresh();
                 }
 
-                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempPath);
+                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
             }
             else if(psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
             {
                 newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/StretchMesh.asset");
-                var tempPath = savePath + ps.name + ".mat";
-                if (AssetDatabase.LoadAssetAtPath<Material>(tempPath) == null)
+                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
                 {
-                    temp = new Material(Shader.Find("ParticleToAnimator/StretchedBillboard"));
-                    temp.name = $"{transform.name}_{ps.name}";
+                    tempMat = new Material(Shader.Find("ParticleToAnimator/StretchedBillboard"));
+                    tempMat.name = matName;
                     var pivot = psRenderer.pivot;
                     pivot.z = 0;
-                    temp.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
-                    temp.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
-                    temp.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
-                    temp.renderQueue = newMaterial.renderQueue;
-                    temp.SetVector("_Offset", pivot);
-                    AssetDatabase.CreateAsset(temp, tempPath);
+                    tempMat.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
+                    tempMat.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
+                    tempMat.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
+                    tempMat.renderQueue = newMaterial.renderQueue;
+                    tempMat.SetVector("_Offset", pivot);
+                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
                     AssetDatabase.Refresh();
                 }
-                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempPath);
+                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
             }
 
             test.AddComponent<MeshFilter>().sharedMesh = newMesh;
@@ -605,9 +671,19 @@ public class ParticleToAnimator : MonoBehaviour
             }
             #endregion
 
+            // 为GameObject添加首尾帧显隐
+            if(rotX[0].time == 0) active.AddKey(rotX[0].time, 1);
+            else
+            {
+                active.AddKey(0, 0);
+                active.AddKey(rotX[0].time, 1);
+            }
+            active.AddKey(rotX[rotX.length - 1].time, 0);
+
             var constantList = new List<AnimationCurve>()
             {
-                texScaleX, texScaleY, texOffsetX, texOffsetY
+                active, texScaleX, texScaleY, texOffsetX, texOffsetY,
+                rotX, rotY, rotZ,
             };
             foreach (var curve in constantList)
             {
@@ -618,8 +694,11 @@ public class ParticleToAnimator : MonoBehaviour
                 }
             }
 
+            
 
             // 绑定曲线到Clip
+            clip.SetCurve(path, typeof(MeshRenderer), "m_Enabled", active);
+
             clip.SetCurve(path, typeof(Transform), "localPosition.x", posX);
             clip.SetCurve(path, typeof(Transform), "localPosition.y", posY);
             clip.SetCurve(path, typeof(Transform), "localPosition.z", posZ);
