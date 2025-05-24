@@ -2,13 +2,15 @@
 using System.Collections.Generic;
 using System.Collections;
 using System.IO;
+using System;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Animations;
 #endif
 
-public class ParticleToAnimator : MonoBehaviour
+public partial class ParticleToAnimator : MonoBehaviour
 {
     [Header("Settings")]
     public float frameRate = 30;        // 帧速率
@@ -48,10 +50,13 @@ public class ParticleToAnimator : MonoBehaviour
             public List<int> ids = new List<int>();
         }
         public int nextId;
-        public Dictionary<int, IdData> data = new Dictionary<int, IdData>();
+        public Queue<int> recycleIds = new Queue<int>();
+        public Dictionary<uint, int> data = new Dictionary<uint, int>();
+        public HashSet<uint> prevSeeds = new HashSet<uint>();
     }
 
     private List<ParticleSystem> psList = new List<ParticleSystem>();
+    private List<Animator> animatorList = new List<Animator>();
     private Dictionary<string, ParticleData> recordedData = new Dictionary<string, ParticleData>();
     private Dictionary<ParticleSystem, ParticleIdData> particleIds = new Dictionary<ParticleSystem, ParticleIdData>();
     private bool isRecording;
@@ -59,10 +64,10 @@ public class ParticleToAnimator : MonoBehaviour
     private int startFrame;
     private Transform TempTrans;
     private Transform TempChildTrans;
+    private Transform WorldSpaceTrans;
     private float deltaTime;
 
     ParticleSystem.Particle[] tempParticles = new ParticleSystem.Particle[100];
-
 
     public void StartBaked()
     {
@@ -108,7 +113,9 @@ public class ParticleToAnimator : MonoBehaviour
         ShowProgressBar(0f);
         recordedData.Clear();
         psList.Clear();
+        animatorList.Clear();
         particleIds.Clear();
+        WorldSpaceTrans = null;
 
         float duration = 0f;
         foreach(var exclude in excludes)
@@ -116,7 +123,13 @@ public class ParticleToAnimator : MonoBehaviour
             exclude.SetActive(false);
         }
 
-        foreach (var ps in GetComponentsInChildren<ParticleSystem>())
+        foreach(var animator in GetComponentsInChildren<Animator>())
+        {
+            animator.enabled = false;
+            animatorList.Add(animator);
+        }
+
+        foreach (var ps in GetComponentsInChildren<ParticleSystem>(true))
         {
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             psList.Add(ps);
@@ -124,35 +137,30 @@ public class ParticleToAnimator : MonoBehaviour
             ps.Clear(false);
             ps.Play(false);
             ps.Pause(false);
-            duration = Mathf.Max(duration, ps.main.duration * 1.5f); // 还要加上粒子的生存时间。先简单乘以1.5
+            duration = Mathf.Max(duration, ps.main.duration + ps.main.startLifetime.constantMax); // 还要加上粒子的生存时间
         }
 
         Debug.LogError($"duration:{duration}");
-        Debug.LogError($"Start :{Time.time}");
+        Debug.LogError($"Start :{Time.realtimeSinceStartup}");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         isRecording = true;
         startTime = 0f;
         startFrame = 0;
         deltaTime = 1f / frameRate;
-        //StartCoroutine(StartStopRecording(duration));
 
         while(duration >= 0f)
         {
             duration -= deltaTime;
             RecordParticleData();
+            //Debug.LogError($"Time.fixedDeltaTime:{Time.fixedDeltaTime}");
         }
-        StopRecording();
-    }
 
-    IEnumerator StartStopRecording(float t)
-    {
-        yield return new WaitForSeconds(t);
-        //foreach (var ps in psList)
-        //{
-        //    ps.Simulate(deltaTime, true, false);
-        //}
-        RecordParticleData();
+        foreach (var animator in animatorList) animator.enabled = true;
+
+        var sw2 = System.Diagnostics.Stopwatch.StartNew();
         StopRecording();
-        Debug.LogError($"Finished :{Time.time}");
+        Debug.LogError($"StopRecording Cost:{sw2.ElapsedMilliseconds} ms");
+        Debug.LogError($"Finished :{Time.realtimeSinceStartup}, Cost:{sw.ElapsedMilliseconds} ms");
     }
 
     public static Matrix4x4 CalculateTransformationMatrix(
@@ -239,46 +247,58 @@ public class ParticleToAnimator : MonoBehaviour
 
     void ResetParticleCount()
     {
-        foreach(var p in particleIds)
-        {
-            foreach(var id in p.Value.data)
-            {
-                id.Value.count = 0;
-            }
-        }
+        //foreach(var p in particleIds)
+        //{
+        //    foreach(var id in p.Value.data)
+        //    {
+        //        id.Value.count = 0;
+        //    }
+        //}
     }
     int GetParticleId(ParticleSystem ps, ref ParticleSystem.Particle particle)
     {
         var remainingLifetime = particle.remainingLifetime;
-        //if (!Mathf.Approximately(0f, (particle.startLifetime - remainingLifetime) % deltaTime))
-        //{
-        //    remainingLifetime = Mathf.Min(particle.startLifetime, particle.remainingLifetime + (ps.startDelay % deltaTime));
-        //}
-
-        int spawnInFrame = startFrame - Mathf.RoundToInt((particle.startLifetime - remainingLifetime) / deltaTime);
-        //Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, spawn:{spawnInFrame}, curFrame:{startFrame}, {particle.startLifetime}, {particle.remainingLifetime}:{remainingLifetime}, delay:{startDelay}");
-        if (Mathf.Abs(particle.startLifetime - remainingLifetime) < deltaTime)
+        var liveingFrameCnt = Mathf.FloorToInt(-0.001f + (particle.startLifetime - remainingLifetime) / deltaTime);
+        int spawnInFrame = startFrame - liveingFrameCnt;
+        var seed = particle.randomSeed;
+        if (!particleIds.TryGetValue(ps, out var p))
         {
+            particleIds[ps] = p = new ParticleIdData();
+        }
+        Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, frame:{spawnInFrame}:{startFrame}, {particle.startLifetime}:{remainingLifetime}, liveF:{liveingFrameCnt}:{(particle.startLifetime - remainingLifetime) / deltaTime}, delta:{particle.startLifetime - remainingLifetime}:{deltaTime}, seed:{seed}");
+        if (!p.prevSeeds.Contains(seed))
+        {
+            p.prevSeeds.Add(seed);
             particle.remainingLifetime = particle.startLifetime;
-            if (!particleIds.TryGetValue(ps, out var p))
+            
+            if(!p.data.TryGetValue(seed, out var id))
             {
-                particleIds[ps] = p = new ParticleIdData();
-            }
-            if(!p.data.TryGetValue(startFrame, out var pIdData))
-            {
-                p.data[startFrame] = pIdData = new ParticleIdData.IdData();
+                p.data[seed] = id = p.data.Count;
             }
 
-            var idList = pIdData.ids;
-            idList.Add(p.nextId++);
 
-            //Debug.LogError($"idCount:{idList.Count}");
-            // 按顺序取，不会越界
-            return idList[idList.Count - 1];
+            Debug.LogError($"new id:{id}");
+            return id;
         }
 
-        var data = particleIds[ps].data[spawnInFrame];
-        return data.ids[data.count++];
+        return particleIds[ps].data[seed];
+    }
+
+    void ResetTransform(Transform transform, Transform parent = null, Transform copy = null)
+    {
+        if(parent != null) transform.SetParent(parent);
+        if(copy == null)
+        {
+            transform.localPosition = Vector3.zero;
+            transform.localRotation = Quaternion.identity;
+            transform.localScale = Vector3.one;
+        }
+        else
+        {
+            transform.localPosition = copy.localPosition;
+            transform.localRotation = copy.localRotation;
+            transform.localScale = copy.localScale;
+        }
     }
 
     // 记录单帧数据
@@ -288,12 +308,27 @@ public class ParticleToAnimator : MonoBehaviour
 
         ResetParticleCount();
 
+        foreach(var animtor in animatorList)
+        {
+            AnimatorStateInfo state = animtor.GetCurrentAnimatorStateInfo(0);
+            AnimationClip clip = animtor.GetCurrentAnimatorClipInfo(0)[0].clip;
+
+            float normalizedTime = Mathf.Min(1f, startTime / clip.length);
+            Debug.Log($"Animator Play :{normalizedTime}");
+            animtor.Play(state.fullPathHash, 0, normalizedTime);
+            animtor.Update(0f);
+        }
+
+        bool hadWorldSpace = false;
         foreach (var ps in psList)
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
+            var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
+            hadWorldSpace |= isWorldSpace;
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var originColor = GetMainColor(psRenderer.sharedMaterial, out _);
             ps.Simulate(deltaTime, false, false, false);
+
             int num = ps.GetParticles(tempParticles);
             //Debug.Log($"num:{num}");
             for (int i = 0; i < num; i++)
@@ -312,11 +347,13 @@ public class ParticleToAnimator : MonoBehaviour
 
                 var originMesh = psRenderer.mesh;
                 Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
-                TempTrans.SetParent(ps.transform);
+                TempTrans.SetParent(isWorldSpace ? null : ps.transform);
                 TempTrans.localPosition = particle.position;
                 TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
                 TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
 
+                TempChildTrans.localRotation = Quaternion.identity;
+                TempChildTrans.localScale = Vector3.one;
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
                     TempTrans.localEulerAngles = particle.rotation3D;
@@ -331,14 +368,13 @@ public class ParticleToAnimator : MonoBehaviour
                 else if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
                 {
                     TempTrans.localRotation = Quaternion.FromToRotation(Vector3.up, particle.velocity);
-                    TempTrans.localScale = new Vector3(1, psRenderer.lengthScale, 1);
+                    TempTrans.localScale = Vector3.Scale(TempTrans.localScale, new Vector3(1, psRenderer.lengthScale, 1));
                     pivotOffset = Vector3.zero;
                 }
                 TempChildTrans.localPosition = pivotOffset;
-                TempChildTrans.localRotation = Quaternion.identity; 
-                TempChildTrans.localScale = Vector3.one;
 
-                var position = TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
+
+                var position = isWorldSpace ? transform.InverseTransformPoint(TempChildTrans.position) : TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
                 var color = particle.GetCurrentColor(ps) * originColor;
                 if(psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
                 {
@@ -363,9 +399,13 @@ public class ParticleToAnimator : MonoBehaviour
                     int rows = tsa.numTilesY;
                     data.textureOffset = CalculateTilingOffset(tsa, particle, new Vector2Int(cols, rows));
                 }
-
                 var name = GetParticleName(ps.name, id);
                 string animPath = path == "" ? name : path + "/" + name;
+                if (isWorldSpace)
+                {
+                    name = animPath.Replace("/", "_");
+                    animPath = $"{WorldSpaceTrans.name}/" + name;
+                }
                 if (recordedData.TryGetValue(animPath, out var particleData))
                 {
                     particleData.recordedData.Add(data);
@@ -385,7 +425,10 @@ public class ParticleToAnimator : MonoBehaviour
             }
             ps.SetParticles(tempParticles, num);
         }
-
+        if (hadWorldSpace && WorldSpaceTrans == null)
+        {
+            WorldSpaceTrans = new GameObject("World").transform;
+        }
         startTime += deltaTime;
         startFrame++;
     }
@@ -414,6 +457,7 @@ public class ParticleToAnimator : MonoBehaviour
     {
         isRecording = false;
         CancelInvoke();
+        ReuseRenderer();
         GenerateAnimation();
         EditorUtility.ClearProgressBar();
     }
@@ -446,11 +490,12 @@ public class ParticleToAnimator : MonoBehaviour
         newGo.transform.localRotation = transform.localRotation;
         newGo.transform.localScale = transform.localScale;
 
+        if (WorldSpaceTrans != null) ResetTransform(WorldSpaceTrans, newGo.transform);
+
         var animtor = GetComponent<Animator>();
         AnimationClip clip = animtor == null ? new AnimationClip() : Instantiate(animtor.runtimeAnimatorController.animationClips[0]);
         clip.name = gameObject.name + "-BakedAnimation";
         clip.frameRate = frameRate;
-
 
         #region 复制Renderer
         var renderers = GetComponentsInChildren<Renderer>();
@@ -475,10 +520,7 @@ public class ParticleToAnimator : MonoBehaviour
                     if (child == null)
                     {
                         child = new GameObject(childName).transform;
-                        child.SetParent(t);
-                        child.localPosition = originChild.localPosition;
-                        child.localRotation = originChild.localRotation;
-                        child.localScale = originChild.localScale;
+                        ResetTransform(child, t, originChild);
                         if (originChild.GetComponent<Animator>())
                         {
                             child.gameObject.AddComponent<Animator>().runtimeAnimatorController = originChild.GetComponent<Animator>().runtimeAnimatorController;
@@ -487,10 +529,7 @@ public class ParticleToAnimator : MonoBehaviour
                     t = child;
                     originT = originChild;
                 }
-                newRenderGO.transform.SetParent(newGo.transform.Find(_path));
-                newRenderGO.transform.localPosition = renderer.transform.localPosition;
-                newRenderGO.transform.localRotation = renderer.transform.localRotation;
-                newRenderGO.transform.localScale = renderer.transform.localScale;
+                ResetTransform(newRenderGO.transform, newGo.transform.Find(_path), renderer.transform);
             }
             else
             {
@@ -587,10 +626,12 @@ public class ParticleToAnimator : MonoBehaviour
 
             test.AddComponent<MeshFilter>().sharedMesh = newMesh;
             test.AddComponent<MeshRenderer>().sharedMaterial = newMaterial;
-            if (ps.transform != transform)
+
+            var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
+            if (ps.transform != transform && !isWorldSpace)
             {
                 var _path = GetRelativePath(transform, ps.transform);
-                var t = newGo.transform;
+                var t = newGo.transform; // 不跟着父节点走。有可能被录制了动画，重新挂一个父节点
                 var originT = transform;
                 foreach (var childName in _path.Split('/'))
                 {
@@ -599,10 +640,7 @@ public class ParticleToAnimator : MonoBehaviour
                     if (child == null)
                     {
                         child = new GameObject(childName).transform;
-                        child.SetParent(t);
-                        child.localPosition = originChild.localPosition;
-                        child.localRotation = originChild.localRotation;
-                        child.localScale = originChild.localScale;
+                        ResetTransform(child, t, originChild);
                     }
                     t = child;
                     originT = originChild;
@@ -611,11 +649,9 @@ public class ParticleToAnimator : MonoBehaviour
             }
             else
             {
-                test.transform.SetParent(newGo.transform);
+                test.transform.SetParent(isWorldSpace ? WorldSpaceTrans : newGo.transform);
             }
-            test.transform.localPosition = Vector3.zero;
-            test.transform.localRotation = Quaternion.identity;
-            test.transform.localScale = Vector3.one;
+            ResetTransform(test.transform);
 
             #endregion
 
@@ -723,6 +759,7 @@ public class ParticleToAnimator : MonoBehaviour
             clip.SetCurve(matPath, typeof(MeshRenderer), "material._MainTex_ST.w", texOffsetY);
 
         }
+
         var clipPath = $"{savePath}{clip.name}.anim";// AssetDatabase.GenerateUniqueAssetPath($"Assets/{clip.name}.anim");
         AssetDatabase.CreateAsset(clip, clipPath);
         AssetDatabase.Refresh();
@@ -735,139 +772,10 @@ public class ParticleToAnimator : MonoBehaviour
         AssetDatabase.Refresh();
 
         newGo.AddComponent<Animator>().runtimeAnimatorController = controller;
-        PrefabUtility.SaveAsPrefabAsset(newGo, $"{savePath}{transform.name}.prefab");
+        //PrefabUtility.SaveAsPrefabAsset(newGo, $"{savePath}{transform.name}.prefab");
 
         Debug.Log("Animation baked successfully!");
     }
-
-
-    #region Gizmos
-
-    void OnDrawGizmos()
-    {
-        //if (!Application.isPlaying || isRecording) return;
-
-        foreach (var ps in GetComponentsInChildren<ParticleSystem>())
-        {
-            var num = ps.GetParticles(tempParticles);
-            var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
-            for (int i = 0; i < num; i++)
-            {
-                Gizmos.color = Color.green;
-                if (TempTrans == null)
-                {
-                    TempTrans = new GameObject("TempTrans").transform;
-                    //TempTrans.gameObject.hideFlags = HideFlags.DontSave;
-                    TempTrans.gameObject.hideFlags = HideFlags.HideAndDontSave;
-                    TempChildTrans = new GameObject("TempChild").transform;
-                    TempChildTrans.SetParent(TempTrans, false);
-                }
-                var particle = tempParticles[i];
-                var originMesh = psRenderer.mesh;
-                Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
-                TempTrans.SetParent(ps.transform);
-                TempTrans.localPosition = particle.position;
-                TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
-                TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
-
-
-                if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
-                {
-                    pivotOffset.Scale(originMesh.bounds.size);
-                    pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
-                }
-                else if(psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
-                {
-                    // pivotOffset相对于视图坐标系的偏移
-                    var cameraTrans = Camera.current.transform;
-                    var offsetPos = cameraTrans.InverseTransformPoint(TempTrans.position);
-                    pivotOffset.z = -pivotOffset.z;
-                    pivotOffset.Scale(TempTrans.lossyScale);
-                    offsetPos += pivotOffset;
-                    pivotOffset = TempTrans.InverseTransformPoint(cameraTrans.TransformPoint(offsetPos));
-                }
-                else if (psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
-                {
-                    // z值没有作用
-                    pivotOffset.z = pivotOffset.y * 2;
-                    pivotOffset.y = 0;
-
-                    pivotOffset = Vector3.zero; // test
-
-                }
-                //Debug.Log($"{particle.rotation}, {particle.axisOfRotation}, v:{particle.velocity}");
-                TempChildTrans.localPosition = pivotOffset;
-                TempChildTrans.localRotation = Quaternion.identity;
-                TempChildTrans.localScale = Vector3.one;
-
-                var realPos = TempChildTrans.position - TempTrans.position + TempTrans.localPosition;
-                Gizmos.DrawWireSphere(TempChildTrans.position, 0.1f);
-                Gizmos.DrawRay(TempChildTrans.position, particle.axisOfRotation);
-                Gizmos.color = Color.red;
-                Gizmos.DrawRay(TempChildTrans.position, particle.velocity);
-
-                //DrawStretchedGizmos(ps, particle);
-            }
-        }
-    }
-
-    static Mesh stretchedMeshGizmos;
-    void DrawStretchedGizmos(ParticleSystem ps, ParticleSystem.Particle p)
-    {
-        var renderer = ps.GetComponent<ParticleSystemRenderer>();
-        Vector3 pos = p.position;
-        Vector3 vel = p.velocity;
-        float w = p.size;
-
-        // 1. 方向与基准
-        Vector3 dir = vel.magnitude > 1e-6f ? vel.normalized : Vector3.forward;
-        Vector3 camF = SceneView.currentDrawingSceneView.camera.transform.forward;
-        Vector3 camV = SceneView.currentDrawingSceneView.camera.velocity;
-
-        // 2. 计算三重拉伸
-        float L_cam = renderer.cameraVelocityScale * Vector3.Dot(camV, dir);
-        float L_vel = renderer.velocityScale * vel.magnitude;
-        float L_base = renderer.lengthScale * w;
-        float length = L_base + L_vel + L_cam;
-
-        // 3. 自由拉伸修正
-        //if (!renderer.freeformStretching)
-        //{
-        //    float align = Mathf.Abs(Vector3.Dot(dir, camF));
-        //    length *= (1 - align);  // 面向时变细
-        //}
-        float align = Mathf.Abs(Vector3.Dot(dir, camF));
-        length *= (1 - align);  // 面向时变细
-
-        // 4. 半幅向量
-        Vector3 halfLen = dir * (length * 0.5f);
-        Vector3 right = Vector3.Cross(camF, dir).normalized;
-        Vector3 halfWid = right * (w * 0.5f);
-
-        // 5. 顶点位置
-        Vector3[] quad = new Vector3[4];
-        quad[0] = halfLen + halfWid;
-        quad[1] = halfLen - halfWid;
-        quad[2] = -halfLen - halfWid;
-        quad[3] = -halfLen + halfWid;
-
-        // 6. 可选：绕 dir 轴额外旋转
-        //if (renderer.rotateWithStretchDirection)
-        //{
-        //    Quaternion rot = Quaternion.FromToRotation(Vector3.forward, dir);
-        //    for (int i = 0; i < 4; ++i)
-        //        quad[i] = pos + rot * (quad[i] - pos);
-        //}
-
-        Gizmos.color = Color.red;
-        foreach (var q in quad)
-        {
-            Gizmos.DrawWireSphere(q + pos, 0.1f);
-        }
-    }
-
-    #endregion
-
 #endif
 }
 
