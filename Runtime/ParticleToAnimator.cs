@@ -390,7 +390,7 @@ public partial class ParticleToAnimator : MonoBehaviour
 
                 var position = isWorldSpace ? transform.InverseTransformPoint(TempChildTrans.position) : TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
                 var color = particle.GetCurrentColor(ps) * originColor;
-                if(psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
+                if(psRenderer.renderMode != ParticleSystemRenderMode.Mesh && psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
                 {
                     color *= colorScale;
                 }
