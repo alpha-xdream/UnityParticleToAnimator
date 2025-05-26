@@ -370,7 +370,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                             TempTrans.rotation = Quaternion.identity;
                             break;
                         case ParticleSystemRenderSpace.Velocity:
-                            TempTrans.localRotation *= Quaternion.LookRotation(particle.velocity.normalized);
+                            if(isWorldSpace) TempTrans.localRotation = Quaternion.LookRotation(particle.velocity.normalized);
+                            else TempTrans.localRotation *= Quaternion.LookRotation(particle.velocity.normalized);
                             break;
                     }
                 }
@@ -389,6 +390,10 @@ public partial class ParticleToAnimator : MonoBehaviour
 
 
                 var position = isWorldSpace ? transform.InverseTransformPoint(TempChildTrans.position) : TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
+                var rotation = (isWorldSpace ? Quaternion.Inverse(transform.localRotation) : Quaternion.identity) // 抵消根节点的旋转
+                                    * TempTrans.localRotation * TempChildTrans.localRotation;
+                var scale = Vector3.Scale(TempChildTrans.localScale, TempTrans.localScale);
+                if (isWorldSpace) scale.Scale(Vector3.Scale(Vector3.one, transform.localScale));
                 var color = particle.GetCurrentColor(ps) * originColor;
                 if(psRenderer.renderMode != ParticleSystemRenderMode.Mesh && psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
                 {
@@ -398,8 +403,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                 {
                     time = startTime,
                     position = position,
-                    rotation = TempTrans.localRotation * TempChildTrans.localRotation,
-                    scale = Vector3.Scale(TempChildTrans.localScale, TempTrans.localScale),
+                    rotation = rotation,
+                    scale = scale,
                     color = color
                 };
 
