@@ -157,9 +157,9 @@ public partial class ParticleToAnimator : MonoBehaviour
 
         foreach (var animator in animatorList) animator.enabled = true;
 
-        var sw2 = System.Diagnostics.Stopwatch.StartNew();
+        //var sw2 = System.Diagnostics.Stopwatch.StartNew();
         StopRecording();
-        Debug.LogError($"StopRecording Cost:{sw2.ElapsedMilliseconds} ms");
+        //Debug.LogError($"StopRecording Cost:{sw2.ElapsedMilliseconds} ms");
         Debug.LogError($"Finished :{Time.realtimeSinceStartup}, Cost:{sw.ElapsedMilliseconds} ms");
     }
 
@@ -277,7 +277,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             }
 
 
-            Debug.LogError($"new id:{id}");
+            //Debug.LogError($"new id:{id}");
             return id;
         }
 
@@ -300,6 +300,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             transform.localScale = copy.localScale;
         }
     }
+
 
     // 记录单帧数据
     void RecordParticleData()
@@ -357,9 +358,21 @@ public partial class ParticleToAnimator : MonoBehaviour
                 TempChildTrans.localScale = Vector3.one;
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
-                    TempTrans.localEulerAngles = particle.rotation3D;
                     pivotOffset.Scale(originMesh.bounds.size);
                     pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
+
+                    switch (psRenderer.alignment)
+                    {
+                        case ParticleSystemRenderSpace.Local:
+                            TempTrans.localEulerAngles = particle.rotation3D;
+                            break;
+                        case ParticleSystemRenderSpace.World:
+                            TempTrans.rotation = Quaternion.identity;
+                            break;
+                        case ParticleSystemRenderSpace.Velocity:
+                            TempTrans.localRotation *= Quaternion.LookRotation(particle.velocity.normalized);
+                            break;
+                    }
                 }
                 else if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
                 {
