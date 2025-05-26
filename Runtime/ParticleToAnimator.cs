@@ -265,7 +265,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         {
             particleIds[ps] = p = new ParticleIdData();
         }
-        Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, frame:{spawnInFrame}:{startFrame}, {particle.startLifetime}:{remainingLifetime}, liveF:{liveingFrameCnt}:{(particle.startLifetime - remainingLifetime) / deltaTime}, delta:{particle.startLifetime - remainingLifetime}:{deltaTime}, seed:{seed}");
+        //Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, frame:{spawnInFrame}:{startFrame}, {particle.startLifetime}:{remainingLifetime}, liveF:{liveingFrameCnt}:{(particle.startLifetime - remainingLifetime) / deltaTime}, delta:{particle.startLifetime - remainingLifetime}:{deltaTime}, seed:{seed}");
         if (!p.prevSeeds.Contains(seed))
         {
             p.prevSeeds.Add(seed);
@@ -314,17 +314,18 @@ public partial class ParticleToAnimator : MonoBehaviour
             AnimationClip clip = animtor.GetCurrentAnimatorClipInfo(0)[0].clip;
 
             float normalizedTime = Mathf.Min(1f, startTime / clip.length);
-            Debug.Log($"Animator Play :{normalizedTime}");
             animtor.Play(state.fullPathHash, 0, normalizedTime);
             animtor.Update(0f);
         }
 
-        bool hadWorldSpace = false;
         foreach (var ps in psList)
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
             var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
-            hadWorldSpace |= isWorldSpace;
+            if (isWorldSpace && WorldSpaceTrans == null)
+            {
+                WorldSpaceTrans = new GameObject("World").transform;
+            }
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var originColor = GetMainColor(psRenderer.sharedMaterial, out _);
             ps.Simulate(deltaTime, false, false, false);
@@ -424,10 +425,6 @@ public partial class ParticleToAnimator : MonoBehaviour
                 }
             }
             ps.SetParticles(tempParticles, num);
-        }
-        if (hadWorldSpace && WorldSpaceTrans == null)
-        {
-            WorldSpaceTrans = new GameObject("World").transform;
         }
         startTime += deltaTime;
         startFrame++;
