@@ -657,6 +657,10 @@ public partial class ParticleToAnimator : MonoBehaviour
                     {
                         child = new GameObject(childName).transform;
                         ResetTransform(child, t, originChild);
+                        if (originChild.GetComponent<Animator>())
+                        {
+                            child.gameObject.AddComponent<Animator>().runtimeAnimatorController = originChild.GetComponent<Animator>().runtimeAnimatorController;
+                        }
                     }
                     t = child;
                     originT = originChild;
