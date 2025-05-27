@@ -357,8 +357,11 @@ public partial class ParticleToAnimator : MonoBehaviour
                 TempChildTrans.localScale = Vector3.one;
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
-                    TempTrans.localScale = ps.transform.localScale;
-                    TempChildTrans.localScale = particle.GetCurrentSize3D(ps);
+                    if (isWorldSpace)
+                    {
+                        TempTrans.localScale = ps.transform.parent.lossyScale;
+                        TempChildTrans.localScale = particle.GetCurrentSize3D(ps);
+                    }
                     pivotOffset.Scale(originMesh.bounds.size);
                     pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
 
