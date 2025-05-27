@@ -152,7 +152,6 @@ public partial class ParticleToAnimator : MonoBehaviour
         {
             duration -= deltaTime;
             RecordParticleData();
-            //Debug.LogError($"Time.fixedDeltaTime:{Time.fixedDeltaTime}");
         }
 
         foreach (var animator in animatorList) animator.enabled = true;
@@ -270,8 +269,8 @@ public partial class ParticleToAnimator : MonoBehaviour
         {
             p.prevSeeds.Add(seed);
             particle.remainingLifetime = particle.startLifetime;
-            
-            if(!p.data.TryGetValue(seed, out var id))
+
+            if (!p.data.TryGetValue(seed, out var id))
             {
                 p.data[seed] = id = p.data.Count;
             }
@@ -358,6 +357,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                 TempChildTrans.localScale = Vector3.one;
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
+                    TempTrans.localScale = ps.transform.localScale;
+                    TempChildTrans.localScale = particle.GetCurrentSize3D(ps);
                     pivotOffset.Scale(originMesh.bounds.size);
                     pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
 
@@ -393,7 +394,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                 var rotation = (isWorldSpace ? Quaternion.Inverse(transform.localRotation) : Quaternion.identity) // 抵消根节点的旋转
                                     * TempTrans.localRotation * TempChildTrans.localRotation;
                 var scale = Vector3.Scale(TempChildTrans.localScale, TempTrans.localScale);
-                if (isWorldSpace) scale.Scale(Vector3.Scale(Vector3.one, transform.localScale));
+                //if (isWorldSpace) scale.Scale(new Vector3(1f/ transform.lossyScale.x, 1f/transform.lossyScale.y, 1f/ transform.lossyScale.z));
                 var color = particle.GetCurrentColor(ps) * originColor;
                 if(psRenderer.renderMode != ParticleSystemRenderMode.Mesh && psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
                 {
@@ -422,7 +423,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                 string animPath = path == "" ? name : path + "/" + name;
                 if (isWorldSpace)
                 {
-                    name = animPath.Replace("/", "_");
+                    name = GetParticleName(path.Replace("/", "_"), id);
                     animPath = $"{WorldSpaceTrans.name}/" + name;
                 }
                 if (recordedData.TryGetValue(animPath, out var particleData))
