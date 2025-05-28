@@ -22,7 +22,7 @@ public partial class ParticleToAnimator : MonoBehaviour
 #if UNITY_EDITOR
 
     // 粒子数据存储结构
-    private class ParticleData
+    private class RecoardParticleData
     {
         // 记录粒子的唯一id。ps.GetParticles获取到的粒子是按生成顺序排序的。如果当前帧有2个粒子，下一帧变成1个粒子，那么index为0的粒子会是上一帧index为1的粒子。
         public int id;
@@ -42,23 +42,30 @@ public partial class ParticleToAnimator : MonoBehaviour
         public Vector4 textureOffset;
     }
 
-    private class ParticleIdData
+    private class ParticleData
     {
-        internal class IdData
+        internal class World
         {
-            public int count; // 获取id的次数。 每轮重置
-            public List<int> ids = new List<int>();
+            public Vector3 position;
+            public Quaternion rotation;
+            public Vector3 scale;
+            public Vector3 localPosition;
+            public Quaternion localRotation;
+            public Vector3 localScale;
         }
         public int nextId;
         public Queue<int> recycleIds = new Queue<int>();
-        public Dictionary<uint, int> data = new Dictionary<uint, int>();
+        public Dictionary<uint, int> particleId = new Dictionary<uint, int>();
         public HashSet<uint> prevSeeds = new HashSet<uint>();
+
+        public bool isWorld;
+        public Dictionary<uint, World> simulateWorld = new Dictionary<uint, World>();
     }
 
     private List<ParticleSystem> psList = new List<ParticleSystem>();
     private List<Animator> animatorList = new List<Animator>();
-    private Dictionary<string, ParticleData> recordedData = new Dictionary<string, ParticleData>();
-    private Dictionary<ParticleSystem, ParticleIdData> particleIds = new Dictionary<ParticleSystem, ParticleIdData>();
+    private Dictionary<string, RecoardParticleData> recordedData = new Dictionary<string, RecoardParticleData>();
+    private Dictionary<ParticleSystem, ParticleData> particleDatas = new Dictionary<ParticleSystem, ParticleData>();
     private bool isRecording;
     private float startTime;
     private int startFrame;
@@ -114,7 +121,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         recordedData.Clear();
         psList.Clear();
         animatorList.Clear();
-        particleIds.Clear();
+        particleDatas.Clear();
         WorldSpaceTrans = null;
 
         float duration = 0f;
@@ -131,6 +138,20 @@ public partial class ParticleToAnimator : MonoBehaviour
 
         foreach (var ps in GetComponentsInChildren<ParticleSystem>(true))
         {
+            var main = ps.main;
+            var data = new ParticleData();
+            var isWorldSpace = main.simulationSpace == ParticleSystemSimulationSpace.World;
+            if (isWorldSpace && WorldSpaceTrans == null)
+            {
+                WorldSpaceTrans = new GameObject("World").transform;
+            }
+            particleDatas.Add(ps, data);
+
+            if (isWorldSpace)
+            {
+                main.simulationSpace = ParticleSystemSimulationSpace.Local;
+                data.isWorld = true;
+            }
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             psList.Add(ps);
             ps.Stop(false);
@@ -155,6 +176,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         }
 
         foreach (var animator in animatorList) animator.enabled = true;
+        foreach (var ps in psList) ps.simulationSpace = particleDatas[ps].simulateWorld == null ? ParticleSystemSimulationSpace.Local : ParticleSystemSimulationSpace.World;
 
         //var sw2 = System.Diagnostics.Stopwatch.StartNew();
         StopRecording();
@@ -254,15 +276,15 @@ public partial class ParticleToAnimator : MonoBehaviour
         //    }
         //}
     }
-    int GetParticleId(ParticleSystem ps, ref ParticleSystem.Particle particle)
+    int GetParticleId(ParticleSystem ps, ref ParticleSystem.Particle particle, out bool isNew)
     {
         var remainingLifetime = particle.remainingLifetime;
         var liveingFrameCnt = Mathf.FloorToInt(-0.001f + (particle.startLifetime - remainingLifetime) / deltaTime);
         int spawnInFrame = startFrame - liveingFrameCnt;
         var seed = particle.randomSeed;
-        if (!particleIds.TryGetValue(ps, out var p))
+        if (!particleDatas.TryGetValue(ps, out var p))
         {
-            particleIds[ps] = p = new ParticleIdData();
+            particleDatas[ps] = p = new ParticleData();
         }
         //Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, frame:{spawnInFrame}:{startFrame}, {particle.startLifetime}:{remainingLifetime}, liveF:{liveingFrameCnt}:{(particle.startLifetime - remainingLifetime) / deltaTime}, delta:{particle.startLifetime - remainingLifetime}:{deltaTime}, seed:{seed}");
         if (!p.prevSeeds.Contains(seed))
@@ -270,17 +292,18 @@ public partial class ParticleToAnimator : MonoBehaviour
             p.prevSeeds.Add(seed);
             particle.remainingLifetime = particle.startLifetime;
 
-            if (!p.data.TryGetValue(seed, out var id))
+            if (!p.particleId.TryGetValue(seed, out var id))
             {
-                p.data[seed] = id = p.data.Count;
+                p.particleId[seed] = id = p.particleId.Count;
             }
 
-
+            isNew = true;
             //Debug.LogError($"new id:{id}");
             return id;
         }
 
-        return particleIds[ps].data[seed];
+        isNew = false;
+        return particleDatas[ps].particleId[seed];
     }
 
     void ResetTransform(Transform transform, Transform parent = null, Transform copy = null)
@@ -321,11 +344,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         foreach (var ps in psList)
         {
             var path = $"{GetRelativePath(transform, ps.transform)}";
-            var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
-            if (isWorldSpace && WorldSpaceTrans == null)
-            {
-                WorldSpaceTrans = new GameObject("World").transform;
-            }
+            
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var originColor = GetMainColor(psRenderer.sharedMaterial, out _);
             ps.Simulate(deltaTime, false, false, false);
@@ -342,13 +361,13 @@ public partial class ParticleToAnimator : MonoBehaviour
                     TempChildTrans.SetParent(TempTrans, false);
                 }
                 var particle = tempParticles[i];
-                int id = GetParticleId(ps, ref particle);
+                int id = GetParticleId(ps, ref particle, out var isNew);
                 tempParticles[i] = particle;
                 //Debug.Log($"index:{i}, id:{id}");
 
                 var originMesh = psRenderer.mesh;
                 Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
-                TempTrans.SetParent(isWorldSpace ? null : ps.transform);
+                TempTrans.SetParent(ps.transform);
                 TempTrans.localPosition = particle.position;
                 TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
                 TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
@@ -357,11 +376,6 @@ public partial class ParticleToAnimator : MonoBehaviour
                 TempChildTrans.localScale = Vector3.one;
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
-                    if (isWorldSpace)
-                    {
-                        TempTrans.localScale = ps.transform.parent.lossyScale;
-                        TempChildTrans.localScale = particle.GetCurrentSize3D(ps);
-                    }
                     pivotOffset.Scale(originMesh.bounds.size);
                     pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
 
@@ -374,8 +388,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                             TempTrans.rotation = Quaternion.identity;
                             break;
                         case ParticleSystemRenderSpace.Velocity:
-                            if(isWorldSpace) TempTrans.localRotation = Quaternion.LookRotation(particle.velocity.normalized);
-                            else TempTrans.localRotation *= Quaternion.LookRotation(particle.velocity.normalized);
+                            TempTrans.localRotation = Quaternion.LookRotation(particle.velocity.normalized) * TempTrans.localRotation;
                             break;
                     }
                 }
@@ -393,11 +406,12 @@ public partial class ParticleToAnimator : MonoBehaviour
                 TempChildTrans.localPosition = pivotOffset;
 
 
-                var position = isWorldSpace ? transform.InverseTransformPoint(TempChildTrans.position) : TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
-                var rotation = (isWorldSpace ? Quaternion.Inverse(transform.localRotation) : Quaternion.identity) // 抵消根节点的旋转
-                                    * TempTrans.localRotation * TempChildTrans.localRotation;
+                var position = TempTrans.parent.InverseTransformPoint(TempChildTrans.position);
+                var rotation = TempTrans.localRotation * TempChildTrans.localRotation;
                 var scale = Vector3.Scale(TempChildTrans.localScale, TempTrans.localScale);
-                //if (isWorldSpace) scale.Scale(new Vector3(1f/ transform.lossyScale.x, 1f/transform.lossyScale.y, 1f/ transform.lossyScale.z));
+
+                var isWorldSpace = SimulateWorld(ps, ref particle, ref position, ref rotation, ref scale, isNew);
+
                 var color = particle.GetCurrentColor(ps) * originColor;
                 if(psRenderer.renderMode != ParticleSystemRenderMode.Mesh && psRenderer.sharedMaterial.shader.name == "LayaAir3D/Particle/ShurikenParticle")
                 {
@@ -435,7 +449,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                 }
                 else
                 {
-                    recordedData.Add(animPath, new ParticleData()
+                    recordedData.Add(animPath, new RecoardParticleData()
                     {
                         id = id,
                         frame = startFrame,
