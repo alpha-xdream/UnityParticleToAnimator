@@ -34,7 +34,7 @@ public partial class ParticleToAnimator
             world.scale = Vector3.Scale(trans.lossyScale, scale);
         }
 
-        var posDelta = Vector3.zero;// trans.TransformVector(position - world.localPosition);
+        var posDelta = trans.TransformVector(position - world.localPosition);
         //var rotationDelta = Quaternion.Inverse(world.rotation) * rotation; // TODO
         //var scaleDelta = scale - world.scale;
 
