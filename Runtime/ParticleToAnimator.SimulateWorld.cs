@@ -23,7 +23,7 @@ public partial class ParticleToAnimator
         }
 
         var trans = ps.transform;
-
+        var rootScale = transform.lossyScale;
         if (isNew)
         {
             world.localPosition = position;
@@ -39,9 +39,10 @@ public partial class ParticleToAnimator
         //var scaleDelta = scale - world.scale;
 
 
-        position = world.position + posDelta;
-        rotation = trans.rotation * rotation;
+        position = transform.InverseTransformPoint(world.position + posDelta);
+        rotation = Quaternion.Inverse(transform.rotation) * trans.rotation * rotation;
         scale = Vector3.Scale(trans.lossyScale, scale);
+        scale = Vector3.Scale(new Vector3(1f/ rootScale.x, 1f/ rootScale.y, 1f/ rootScale.z), scale);
 
         return true;
     }

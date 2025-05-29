@@ -176,7 +176,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         }
 
         foreach (var animator in animatorList) animator.enabled = true;
-        foreach (var ps in psList) ps.simulationSpace = particleDatas[ps].simulateWorld == null ? ParticleSystemSimulationSpace.Local : ParticleSystemSimulationSpace.World;
+        foreach (var ps in psList) ps.simulationSpace = particleDatas[ps].isWorld ? ParticleSystemSimulationSpace.World : ParticleSystemSimulationSpace.Local;
 
         //var sw2 = System.Diagnostics.Stopwatch.StartNew();
         StopRecording();
@@ -605,6 +605,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             var name = datas.name;
             var ps = datas.ps;
             var particle = datas.particle;
+            var particleData = particleDatas[ps];
 
             #region 创建模拟粒子的节点
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
@@ -660,7 +661,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             test.AddComponent<MeshFilter>().sharedMesh = newMesh;
             test.AddComponent<MeshRenderer>().sharedMaterial = newMaterial;
 
-            var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
+            var isWorldSpace = particleData.isWorld;
             if (ps.transform != transform && !isWorldSpace)
             {
                 var _path = GetRelativePath(transform, ps.transform);
@@ -757,6 +758,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             {
                 active, texScaleX, texScaleY, texOffsetX, texOffsetY,
                 rotX, rotY, rotZ,
+                colorR, colorG, colorB, colorA,
             };
             foreach (var curve in constantList)
             {
