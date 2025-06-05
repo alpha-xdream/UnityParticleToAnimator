@@ -66,6 +66,7 @@ public partial class ParticleToAnimator : MonoBehaviour
     private List<Animator> animatorList = new List<Animator>();
     private Dictionary<string, RecoardParticleData> recordedData = new Dictionary<string, RecoardParticleData>();
     private Dictionary<ParticleSystem, ParticleData> particleDatas = new Dictionary<ParticleSystem, ParticleData>();
+    private Dictionary<Material, string> newMaterals = new Dictionary<Material, string>();
     private bool isRecording;
     private float startTime;
     private int startFrame;
@@ -266,16 +267,6 @@ public partial class ParticleToAnimator : MonoBehaviour
         return Color.white;
     }
 
-    void ResetParticleCount()
-    {
-        //foreach(var p in particleIds)
-        //{
-        //    foreach(var id in p.Value.data)
-        //    {
-        //        id.Value.count = 0;
-        //    }
-        //}
-    }
     int GetParticleId(ParticleSystem ps, ref ParticleSystem.Particle particle, out bool isNew)
     {
         var remainingLifetime = particle.remainingLifetime;
@@ -328,8 +319,6 @@ public partial class ParticleToAnimator : MonoBehaviour
     void RecordParticleData()
     {
         if (!isRecording) return;
-
-        ResetParticleCount();
 
         foreach(var animtor in animatorList)
         {
@@ -652,6 +641,18 @@ public partial class ParticleToAnimator : MonoBehaviour
                     tempMat.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
                     tempMat.renderQueue = newMaterial.renderQueue;
                     tempMat.SetVector("_Offset", pivot);
+                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
+                    AssetDatabase.Refresh();
+                }
+                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
+            }
+            else if(psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
+            {
+                // Mesh复制一个材质球出来。
+                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
+                {
+                    tempMat = new Material(newMaterial);
+                    tempMat.name = matName;
                     AssetDatabase.CreateAsset(tempMat, tempMatPath);
                     AssetDatabase.Refresh();
                 }
