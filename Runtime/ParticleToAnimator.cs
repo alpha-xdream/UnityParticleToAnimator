@@ -66,7 +66,7 @@ public partial class ParticleToAnimator : MonoBehaviour
     private List<Animator> animatorList = new List<Animator>();
     private Dictionary<string, RecoardParticleData> recordedData = new Dictionary<string, RecoardParticleData>();
     private Dictionary<ParticleSystem, ParticleData> particleDatas = new Dictionary<ParticleSystem, ParticleData>();
-    private Dictionary<Material, string> newMaterals = new Dictionary<Material, string>();
+    private Dictionary<Material, Material> newMaterals = new Dictionary<Material, Material>();
     private bool isRecording;
     private float startTime;
     private int startFrame;
@@ -123,6 +123,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         psList.Clear();
         animatorList.Clear();
         particleDatas.Clear();
+        newMaterals.Clear();
         WorldSpaceTrans = null;
 
         float duration = 0f;
@@ -601,62 +602,68 @@ public partial class ParticleToAnimator : MonoBehaviour
             var test = new GameObject(name);
             //Debug.Log($"test new {name}, psRender:{psRenderer.name}");
 
-            var newMesh = psRenderer.mesh;
-            var newMaterial = psRenderer.sharedMaterial;
-            Material tempMat;
+            var originMesh = psRenderer.mesh;
+            var originMaterial = psRenderer.sharedMaterial;
+            Mesh newMesh = null;
+            Material newMaterial = null;
+            newMaterals.TryGetValue(originMaterial, out newMaterial);
             string matName = GetRelativePath(transform, ps.transform, "_");
             matName = matName == "" ? ps.name  : matName;
-            var tempMatPath = savePath + matName + ".mat";
+            var tempMatPath = savePath + matName + "-Baked.mat";
             if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
             {
                 newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/QuadMesh.asset");
-                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
+                if (newMaterial == null && AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
                 {
-                    tempMat = new Material(Shader.Find("ParticleToAnimator/ViewBillboard"));
-                    tempMat.name = matName;
+                    newMaterial = new Material(Shader.Find("ParticleToAnimator/ViewBillboard"));
+                    newMaterial.name = matName;
                     var pivot = psRenderer.pivot;
                     pivot.z = -pivot.z;
-                    tempMat.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
-                    tempMat.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
-                    tempMat.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
-                    tempMat.SetVector("_Offset", pivot);
-                    tempMat.renderQueue = newMaterial.renderQueue;
-                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
+                    newMaterial.SetTexture("_MainTex", originMaterial.GetTexture("_MainTex"));
+                    newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
+                    newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
+                    newMaterial.SetVector("_Offset", pivot);
+                    newMaterial.renderQueue = originMaterial.renderQueue;
+                    AssetDatabase.CreateAsset(newMaterial, tempMatPath);
                     AssetDatabase.Refresh();
+                    newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
+                    newMaterals.Add(originMaterial, newMaterial);
                 }
 
-                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
             }
             else if(psRenderer.renderMode == ParticleSystemRenderMode.Stretch)
             {
                 newMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Packages/com.alphaxdream.particle2animator/Runtime/StretchMesh.asset");
-                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
+                if (newMaterial == null && AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
                 {
-                    tempMat = new Material(Shader.Find("ParticleToAnimator/StretchedBillboard"));
-                    tempMat.name = matName;
+                    newMaterial = new Material(Shader.Find("ParticleToAnimator/StretchedBillboard"));
+                    newMaterial.name = matName;
                     var pivot = psRenderer.pivot;
                     pivot.z = 0;
-                    tempMat.SetTexture("_MainTex", newMaterial.GetTexture("_MainTex"));
-                    tempMat.SetInt("_SrcBlend", newMaterial.GetInt("_SrcBlend"));
-                    tempMat.SetInt("_DstBlend", newMaterial.GetInt("_DstBlend"));
-                    tempMat.renderQueue = newMaterial.renderQueue;
-                    tempMat.SetVector("_Offset", pivot);
-                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
+                    newMaterial.SetTexture("_MainTex", originMaterial.GetTexture("_MainTex"));
+                    newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
+                    newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
+                    newMaterial.renderQueue = originMaterial.renderQueue;
+                    newMaterial.SetVector("_Offset", pivot);
+                    AssetDatabase.CreateAsset(newMaterial, tempMatPath);
                     AssetDatabase.Refresh();
+                    newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
+                    newMaterals.Add(originMaterial, newMaterial);
                 }
-                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
             }
             else if(psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
             {
+                newMesh = originMesh;
                 // Mesh复制一个材质球出来。
-                if (AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
+                if (newMaterial == null && AssetDatabase.LoadAssetAtPath<Material>(tempMatPath) == null)
                 {
-                    tempMat = new Material(newMaterial);
-                    tempMat.name = matName;
-                    AssetDatabase.CreateAsset(tempMat, tempMatPath);
+                    newMaterial = new Material(originMaterial);
+                    newMaterial.name = matName;
+                    AssetDatabase.CreateAsset(newMaterial, tempMatPath);
                     AssetDatabase.Refresh();
+                    newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
+                    newMaterals.Add(originMaterial, newMaterial);
                 }
-                newMaterial = AssetDatabase.LoadAssetAtPath<Material>(tempMatPath);
             }
 
             test.AddComponent<MeshFilter>().sharedMesh = newMesh;

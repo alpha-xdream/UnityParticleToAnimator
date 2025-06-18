@@ -1,6 +1,7 @@
 ﻿#if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
+using static UnityEngine.ParticleSystem;
 
 public partial class ParticleToAnimator
 {
@@ -8,10 +9,12 @@ public partial class ParticleToAnimator
     void OnDrawGizmos()
     {
         if (isRecording) return;
+        if (MeshGizmos == null) MeshGizmos = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/RawResources/Effect/Prefab/UI/Mesh/E_ui_tanshetexiao_01.FBX");
         foreach (var ps in GetComponentsInChildren<ParticleSystem>())
         {
             var num = ps.GetParticles(tempParticles);
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
+            var isWorldSpace = ps.main.simulationSpace == ParticleSystemSimulationSpace.World;
             for (int i = 0; i < num; i++)
             {
                 Gizmos.color = Color.green;
@@ -19,16 +22,14 @@ public partial class ParticleToAnimator
                 {
                     TempTrans = new GameObject("TempTrans").transform;
                     TempTrans.gameObject.hideFlags = HideFlags.HideAndDontSave;
+                    //TempTrans.gameObject.hideFlags = HideFlags.DontSave;
                     TempChildTrans = new GameObject("TempChild").transform;
                     TempChildTrans.SetParent(TempTrans, false);
                 }
                 var particle = tempParticles[i];
                 var originMesh = psRenderer.mesh;
                 Vector3 pivotOffset = psRenderer.pivot; // 获取归一化Pivot偏移
-                if (ps.main.simulationSpace == ParticleSystemSimulationSpace.Local)
-                    TempTrans.SetParent(ps.transform);
-                else if (ps.main.simulationSpace == ParticleSystemSimulationSpace.World)
-                    TempTrans.SetParent(null);
+                TempTrans.SetParent(isWorldSpace ? null : ps.transform);
                 TempTrans.localPosition = particle.position;
                 TempTrans.localEulerAngles = ps.main.startRotation3D ? particle.rotation3D : new Vector3(0, particle.rotation, 0);
                 TempTrans.localScale = ps.main.startSize3D ? particle.GetCurrentSize3D(ps) : Vector3.one * particle.GetCurrentSize(ps);
@@ -36,8 +37,24 @@ public partial class ParticleToAnimator
 
                 if (psRenderer.renderMode == ParticleSystemRenderMode.Mesh)
                 {
+                    TempTrans.localScale = particle.GetCurrentSize3D(ps);
+                    if (isWorldSpace) TempTrans.localScale = Vector3.Scale(TempTrans.localScale, ps.transform.lossyScale);
                     pivotOffset.Scale(originMesh.bounds.size);
                     pivotOffset.z = -pivotOffset.z; // 测试发现，z轴是反的，所以要取反
+
+                    switch (psRenderer.alignment)
+                    {
+                        case ParticleSystemRenderSpace.Local:
+                            TempTrans.localRotation = ps.transform.rotation * TempTrans.localRotation;
+                            break;
+                        case ParticleSystemRenderSpace.World:
+                            TempTrans.rotation = Quaternion.identity;
+                            break;
+                        case ParticleSystemRenderSpace.Velocity:
+                            if (isWorldSpace) TempTrans.localRotation = Quaternion.LookRotation(particle.velocity.normalized);
+                            else TempTrans.localRotation = Quaternion.LookRotation(TempTrans.InverseTransformDirection(particle.velocity.normalized)) * TempTrans.localRotation;
+                            break;
+                    }
                 }
                 else if (psRenderer.renderMode == ParticleSystemRenderMode.Billboard)
                 {
@@ -65,68 +82,14 @@ public partial class ParticleToAnimator
                 Gizmos.DrawWireSphere(TempChildTrans.position, 0.1f);
                 Gizmos.DrawRay(TempChildTrans.position, particle.axisOfRotation);
                 Gizmos.color = Color.red;
-                Gizmos.DrawRay(TempChildTrans.position, particle.velocity);
+                Gizmos.DrawRay(TempChildTrans.position + Vector3.one * 0.01f, particle.velocity.normalized);
 
-                //DrawStretchedGizmos(ps, particle);
+
             }
         }
     }
 
-    static Mesh stretchedMeshGizmos;
-    void DrawStretchedGizmos(ParticleSystem ps, ParticleSystem.Particle p)
-    {
-        var renderer = ps.GetComponent<ParticleSystemRenderer>();
-        Vector3 pos = p.position;
-        Vector3 vel = p.velocity;
-        float w = p.size;
-
-        // 1. 方向与基准
-        Vector3 dir = vel.magnitude > 1e-6f ? vel.normalized : Vector3.forward;
-        Vector3 camF = SceneView.currentDrawingSceneView.camera.transform.forward;
-        Vector3 camV = SceneView.currentDrawingSceneView.camera.velocity;
-
-        // 2. 计算三重拉伸
-        float L_cam = renderer.cameraVelocityScale * Vector3.Dot(camV, dir);
-        float L_vel = renderer.velocityScale * vel.magnitude;
-        float L_base = renderer.lengthScale * w;
-        float length = L_base + L_vel + L_cam;
-
-        // 3. 自由拉伸修正
-        //if (!renderer.freeformStretching)
-        //{
-        //    float align = Mathf.Abs(Vector3.Dot(dir, camF));
-        //    length *= (1 - align);  // 面向时变细
-        //}
-        float align = Mathf.Abs(Vector3.Dot(dir, camF));
-        length *= (1 - align);  // 面向时变细
-
-        // 4. 半幅向量
-        Vector3 halfLen = dir * (length * 0.5f);
-        Vector3 right = Vector3.Cross(camF, dir).normalized;
-        Vector3 halfWid = right * (w * 0.5f);
-
-        // 5. 顶点位置
-        Vector3[] quad = new Vector3[4];
-        quad[0] = halfLen + halfWid;
-        quad[1] = halfLen - halfWid;
-        quad[2] = -halfLen - halfWid;
-        quad[3] = -halfLen + halfWid;
-
-        // 6. 可选：绕 dir 轴额外旋转
-        //if (renderer.rotateWithStretchDirection)
-        //{
-        //    Quaternion rot = Quaternion.FromToRotation(Vector3.forward, dir);
-        //    for (int i = 0; i < 4; ++i)
-        //        quad[i] = pos + rot * (quad[i] - pos);
-        //}
-
-        Gizmos.color = Color.red;
-        foreach (var q in quad)
-        {
-            Gizmos.DrawWireSphere(q + pos, 0.1f);
-        }
-    }
-
+    static Mesh MeshGizmos;
     #endregion
 
 }
