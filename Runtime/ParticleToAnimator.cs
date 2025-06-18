@@ -29,7 +29,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         public int frame; // 设置id时的时间
         public string name;
         public ParticleSystem ps;
-        public ParticleSystem.Particle particle;
+        //public ParticleSystem.Particle particle;
         public List<RecordedData> recordedData = new List<RecordedData>();
     }
     private class RecordedData
@@ -53,10 +53,12 @@ public partial class ParticleToAnimator : MonoBehaviour
             public Quaternion localRotation;
             public Vector3 localScale;
         }
-        public int nextId;
-        public Queue<int> recycleIds = new Queue<int>();
+        public Queue<uint> recycleParticleSeed = new Queue<uint>();
         public Dictionary<uint, int> particleId = new Dictionary<uint, int>();
-        public HashSet<uint> prevSeeds = new HashSet<uint>();
+        public HashSet<uint> allSeeds = new HashSet<uint>(); // 所有粒子的随机种子
+        public HashSet<uint> prevSeeds = new HashSet<uint>(); // 上一帧的随机种子。在RecycleParticleId中使用
+        public HashSet<uint> curSeeds = new HashSet<uint>(); // 当前帧的随机种子。在RecycleParticleId中使用
+
 
         public bool isWorld;
         public Dictionary<uint, World> simulateWorld = new Dictionary<uint, World>();
@@ -279,14 +281,21 @@ public partial class ParticleToAnimator : MonoBehaviour
             particleDatas[ps] = p = new ParticleData();
         }
         //Debug.Log($"ps:{GetRelativePath(transform, ps.transform)}, frame:{spawnInFrame}:{startFrame}, {particle.startLifetime}:{remainingLifetime}, liveF:{liveingFrameCnt}:{(particle.startLifetime - remainingLifetime) / deltaTime}, delta:{particle.startLifetime - remainingLifetime}:{deltaTime}, seed:{seed}");
-        if (!p.prevSeeds.Contains(seed))
+        if (!p.allSeeds.Contains(seed))
         {
-            p.prevSeeds.Add(seed);
+            p.allSeeds.Add(seed);
             particle.remainingLifetime = particle.startLifetime;
 
             if (!p.particleId.TryGetValue(seed, out var id))
             {
-                p.particleId[seed] = id = p.particleId.Count;
+                if (p.recycleParticleSeed.Count > 0)
+                {
+                    p.particleId[seed] = id = p.particleId[p.recycleParticleSeed.Dequeue()];
+                }
+                else
+                {
+                    p.particleId[seed] = id = p.particleId.Count;
+                }
             }
 
             isNew = true;
@@ -340,6 +349,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             ps.Simulate(deltaTime, false, false, false);
 
             int num = ps.GetParticles(tempParticles);
+            RecycleParticleId(ps, num);
             //Debug.Log($"num:{num}");
             for (int i = 0; i < num; i++)
             {
@@ -445,7 +455,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                         frame = startFrame,
                         name = name,
                         ps = ps,
-                        particle = particle,
+                        //particle = particle,
                         recordedData = new List<RecordedData>() { data }
                     });
                 }
@@ -594,12 +604,12 @@ public partial class ParticleToAnimator : MonoBehaviour
             var datas = p.Value;
             var name = datas.name;
             var ps = datas.ps;
-            var particle = datas.particle;
+            //var particle = datas.particle;
             var particleData = particleDatas[ps];
 
             #region 创建模拟粒子的节点
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
-            var test = new GameObject(name);
+            var renderForParticle = new GameObject(name);
             //Debug.Log($"test new {name}, psRender:{psRenderer.name}");
 
             var originMesh = psRenderer.mesh;
@@ -666,8 +676,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                 }
             }
 
-            test.AddComponent<MeshFilter>().sharedMesh = newMesh;
-            test.AddComponent<MeshRenderer>().sharedMaterial = newMaterial;
+            renderForParticle.AddComponent<MeshFilter>().sharedMesh = newMesh;
+            renderForParticle.AddComponent<MeshRenderer>().sharedMaterial = newMaterial;
 
             var isWorldSpace = particleData.isWorld;
             if (ps.transform != transform && !isWorldSpace)
@@ -691,19 +701,19 @@ public partial class ParticleToAnimator : MonoBehaviour
                     t = child;
                     originT = originChild;
                 }
-                test.transform.SetParent(newGo.transform.Find(_path));
+                renderForParticle.transform.SetParent(newGo.transform.Find(_path));
             }
             else
             {
-                test.transform.SetParent(isWorldSpace ? WorldSpaceTrans : newGo.transform);
+                renderForParticle.transform.SetParent(isWorldSpace ? WorldSpaceTrans : newGo.transform);
             }
-            ResetTransform(test.transform);
+            ResetTransform(renderForParticle.transform);
 
             #endregion
 
             foreach (RecordedData data in datas.recordedData)
             {
-                float time = data.time;
+                float time = Mathf.Max(0, data.time - 0.0001f);
 
                 posX.AddKey(time, data.position.x);
                 posY.AddKey(time, data.position.y);
@@ -729,6 +739,33 @@ public partial class ParticleToAnimator : MonoBehaviour
                 texOffsetY.AddKey(time, data.textureOffset.w);
             }
 
+            #region 为GameObject添加显隐
+            if (rotX[0].time == 0) active.AddKey(rotX[0].time, 1);
+            else
+            {
+                active.AddKey(0, 0);
+                active.AddKey(rotX[0].time - 0.0001f, 1);
+            }
+            active.AddKey(rotX[rotX.length - 1].time + deltaTime - 0.0001f, 0);
+            for (int index = 1; index < rotX.length - 1; index++)
+            {
+                var frame = rotX[index];
+                var preframe = rotX[index - 1];
+                var lastframe = rotX[index + 1];
+                if (Mathf.Abs(lastframe.time - frame.time) > deltaTime + 0.001f)
+                {
+                    //active.AddKey(frame.time, 1);
+                    active.AddKey(frame.time + deltaTime - 0.0001f, 0);
+                }
+                if(Mathf.Abs(frame.time - preframe.time) > deltaTime + 0.001f)
+                {
+                    //active.AddKey(frame.time - deltaTime, 0);
+                    active.AddKey(Mathf.Max(0, frame.time - 0.0001f), 1);
+                    
+                }
+            }
+            #endregion
+
             #region Clean Curve
             var cleanList = new List<AnimationCurve>()
             {
@@ -753,14 +790,6 @@ public partial class ParticleToAnimator : MonoBehaviour
             }
             #endregion
 
-            // 为GameObject添加首尾帧显隐
-            if(rotX[0].time == 0) active.AddKey(rotX[0].time, 1);
-            else
-            {
-                active.AddKey(0, 0);
-                active.AddKey(rotX[0].time, 1);
-            }
-            active.AddKey(rotX[rotX.length - 1].time, 0);
 
             var constantList = new List<AnimationCurve>()
             {
