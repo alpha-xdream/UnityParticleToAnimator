@@ -630,8 +630,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                     var pivot = psRenderer.pivot;
                     pivot.z = -pivot.z;
                     newMaterial.SetTexture("_MainTex", originMaterial.GetTexture("_MainTex"));
-                    newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
-                    newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
+                    if(originMaterial.HasProperty("_SrcBlend")) newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
+                    if(originMaterial.HasProperty("_DstBlend")) newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
                     newMaterial.SetVector("_Offset", pivot);
                     newMaterial.renderQueue = originMaterial.renderQueue;
                     AssetDatabase.CreateAsset(newMaterial, tempMatPath);
@@ -651,8 +651,8 @@ public partial class ParticleToAnimator : MonoBehaviour
                     var pivot = psRenderer.pivot;
                     pivot.z = 0;
                     newMaterial.SetTexture("_MainTex", originMaterial.GetTexture("_MainTex"));
-                    newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
-                    newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
+                    if(originMaterial.HasProperty("_SrcBlend")) newMaterial.SetInt("_SrcBlend", originMaterial.GetInt("_SrcBlend"));
+                    if(originMaterial.HasProperty("_DstBlend")) newMaterial.SetInt("_DstBlend", originMaterial.GetInt("_DstBlend"));
                     newMaterial.renderQueue = originMaterial.renderQueue;
                     newMaterial.SetVector("_Offset", pivot);
                     AssetDatabase.CreateAsset(newMaterial, tempMatPath);
@@ -823,7 +823,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             clip.SetCurve(path, typeof(Transform), "localScale.y", scaleY);
             clip.SetCurve(path, typeof(Transform), "localScale.z", scaleZ);
 
-            GetMainColor(psRenderer.sharedMaterial, out var colorKey);
+            GetMainColor(newMaterial, out var colorKey);
             clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.r", colorR);
             clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.g", colorG);
             clip.SetCurve(matPath, typeof(MeshRenderer), $"material.{colorKey}.b", colorB);
