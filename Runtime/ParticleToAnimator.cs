@@ -522,6 +522,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         newGo.transform.position = transform.position;
         newGo.transform.localRotation = transform.localRotation;
         newGo.transform.localScale = transform.localScale;
+        newGo.layer = gameObject.layer;
 
         if (WorldSpaceTrans != null) ResetTransform(WorldSpaceTrans, newGo.transform);
 
@@ -542,6 +543,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                 var newRenderGO = new GameObject(renderer.name);
                 newRenderGO.AddComponent<MeshFilter>().sharedMesh = renderer.GetComponent<MeshFilter>().sharedMesh;
                 newRenderGO.AddComponent<MeshRenderer>().sharedMaterial = renderer.sharedMaterial;
+                newRenderGO.layer = renderer.gameObject.layer;
 
                 var _path = GetRelativePath(transform, renderer.transform.parent);
                 var t = newGo.transform;
@@ -553,6 +555,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                     if (child == null)
                     {
                         child = new GameObject(childName).transform;
+                        child.gameObject.layer = originChild.gameObject.layer;
                         ResetTransform(child, t, originChild);
                         if (originChild.GetComponent<Animator>())
                         {
@@ -610,6 +613,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             #region 创建模拟粒子的节点
             var psRenderer = ps.GetComponent<ParticleSystemRenderer>();
             var renderForParticle = new GameObject(name);
+            renderForParticle.layer = ps.gameObject.layer;
             //Debug.Log($"test new {name}, psRender:{psRenderer.name}");
 
             var originMesh = psRenderer.mesh;
@@ -692,6 +696,7 @@ public partial class ParticleToAnimator : MonoBehaviour
                     if (child == null)
                     {
                         child = new GameObject(childName).transform;
+                        child.gameObject.layer = originChild.gameObject.layer;
                         ResetTransform(child, t, originChild);
                         if (originChild.GetComponent<Animator>())
                         {
