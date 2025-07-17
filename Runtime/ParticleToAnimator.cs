@@ -165,8 +165,8 @@ public partial class ParticleToAnimator : MonoBehaviour
             duration = Mathf.Max(duration, ps.main.duration + ps.main.startLifetime.constantMax); // 还要加上粒子的生存时间
         }
 
-        Debug.LogError($"duration:{duration}");
-        Debug.LogError($"Start :{Time.realtimeSinceStartup}");
+        Debug.Log($"duration:{duration}");
+        Debug.Log($"Start :{Time.realtimeSinceStartup}");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         isRecording = true;
         startTime = 0f;
@@ -184,8 +184,8 @@ public partial class ParticleToAnimator : MonoBehaviour
 
         //var sw2 = System.Diagnostics.Stopwatch.StartNew();
         StopRecording();
-        //Debug.LogError($"StopRecording Cost:{sw2.ElapsedMilliseconds} ms");
-        Debug.LogError($"Finished :{Time.realtimeSinceStartup}, Cost:{sw.ElapsedMilliseconds} ms");
+        //Debug.Log($"StopRecording Cost:{sw2.ElapsedMilliseconds} ms");
+        Debug.Log($"Finished :{Time.realtimeSinceStartup}, Cost:{sw.ElapsedMilliseconds} ms");
     }
 
     public static Matrix4x4 CalculateTransformationMatrix(
@@ -471,14 +471,14 @@ public partial class ParticleToAnimator : MonoBehaviour
         float lifeProgress = 1f - (particle.remainingLifetime / particle.startLifetime);
         int totalFrames = (int)(tileCount.x * tileCount.y);
         float prog = 1f - (particle.remainingLifetime / particle.startLifetime);
-        int currentFrame = Mathf.CeilToInt(totalFrames * tsa.frameOverTime.Evaluate(prog));
-        //Debug.Log($"currentFrame:{currentFrame}, {tsa.frameOverTime.Evaluate(prog)}, {particle.remainingLifetime}/{particle.startLifetime}");
+        int currentFrame = Mathf.FloorToInt(totalFrames * tsa.frameOverTime.Evaluate(prog));
 
         float frameX = currentFrame % (int)tileCount.x;
         float frameY = Mathf.Floor(currentFrame / tileCount.y);
 
         Vector2 scaleTS = new Vector2(1f / tileCount.x, 1f / tileCount.y);
 
+        //Debug.Log($"lifeProgress:{lifeProgress}, currentFrame:{currentFrame}, {frameX}, {frameY}, result:{(frameX * scaleTS.x)},{1 - (frameY * scaleTS.y) - scaleTS.y}");
         return new Vector4(
             scaleTS.x, scaleTS.y,
             (frameX * scaleTS.x), 1 - (frameY * scaleTS.y) - scaleTS.y
