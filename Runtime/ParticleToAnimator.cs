@@ -474,7 +474,7 @@ public partial class ParticleToAnimator : MonoBehaviour
         int currentFrame = Mathf.FloorToInt(totalFrames * tsa.frameOverTime.Evaluate(prog));
 
         float frameX = currentFrame % (int)tileCount.x;
-        float frameY = Mathf.Floor(currentFrame / tileCount.y);
+        float frameY = (currentFrame / (int)tileCount.x);// Mathf.Floor(currentFrame / tileCount.y);
 
         Vector2 scaleTS = new Vector2(1f / tileCount.x, 1f / tileCount.y);
 
