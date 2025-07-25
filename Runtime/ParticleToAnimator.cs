@@ -780,34 +780,44 @@ public partial class ParticleToAnimator : MonoBehaviour
                 colorR, colorG, colorB, colorA,
                 texScaleX, texScaleY, texOffsetX, texOffsetY
             };
+            NormalizeRotationCurve(rotX);
+            NormalizeRotationCurve(rotY);
+            NormalizeRotationCurve(rotZ);
             foreach (var curve in cleanList)
             {
-                for (int index = curve.length - 2; index >= 1; index--)
-                {
-                    var frame = curve[index];
-                    var preframe = curve[index - 1];
-                    var lastframe = curve[index + 1];
-                    if (Mathf.Abs(frame.value - preframe.value) < 0.0001f && Mathf.Abs(frame.value - lastframe.value) < 0.0001f)
-                    {
-                        curve.RemoveKey(index); continue;
-                    }
-                }
+                //for (int index = curve.length - 2; index >= 1; index--)
+                //{
+                //    var frame = curve[index];
+                //    var preframe = curve[index - 1];
+                //    var lastframe = curve[index + 1];
+                //    if (Mathf.Abs(frame.value - preframe.value) < 0.0001f && Mathf.Abs(frame.value - lastframe.value) < 0.0001f)
+                //    {
+                //        curve.RemoveKey(index); continue;
+                //    }
+                //}
+                //if (curve.length == 2 && Mathf.Abs(curve[0].value - curve[1].value) < 0.0001f) curve.RemoveKey(1);
+
+                ReduceKeyframesLinear(curve);
             }
             #endregion
 
 
-            var constantList = new List<AnimationCurve>()
+            var tangentModeMap = new Dictionary<AnimationUtility.TangentMode, List<AnimationCurve>>()
             {
-                active, texScaleX, texScaleY, texOffsetX, texOffsetY,
-                rotX, rotY, rotZ,
-                colorR, colorG, colorB, colorA,
+                { AnimationUtility.TangentMode.Constant, new List<AnimationCurve>() { active, texScaleX, texScaleY, texOffsetX, texOffsetY, } },
+                { AnimationUtility.TangentMode.Linear, new List<AnimationCurve>() { rotX, rotY, rotZ, colorR, colorG, colorB, colorA, } },
             };
-            foreach (var curve in constantList)
+            foreach (var pair in tangentModeMap)
             {
-                for(int index = curve.length - 1; index >= 0; index--)
+                var mode = pair.Key;
+                var curves = pair.Value;
+                foreach(var curve in curves)
                 {
-                    AnimationUtility.SetKeyLeftTangentMode(curve, index, AnimationUtility.TangentMode.Constant);
-                    AnimationUtility.SetKeyRightTangentMode(curve, index, AnimationUtility.TangentMode.Constant);
+                    for(int index = curve.length - 1; index >= 0; index--)
+                    {
+                        AnimationUtility.SetKeyLeftTangentMode(curve, index, mode);
+                        AnimationUtility.SetKeyRightTangentMode(curve, index, mode);
+                    }
                 }
             }
 
