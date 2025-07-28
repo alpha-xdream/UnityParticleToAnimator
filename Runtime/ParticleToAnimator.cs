@@ -805,7 +805,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             var tangentModeMap = new Dictionary<AnimationUtility.TangentMode, List<AnimationCurve>>()
             {
                 { AnimationUtility.TangentMode.Constant, new List<AnimationCurve>() { active, texScaleX, texScaleY, texOffsetX, texOffsetY, } },
-                { AnimationUtility.TangentMode.Linear, new List<AnimationCurve>() { rotX, rotY, rotZ, colorR, colorG, colorB, colorA, } },
+                { AnimationUtility.TangentMode.Linear, new List<AnimationCurve>() { posX, posY, posZ, rotX, rotY, rotZ, colorR, colorG, colorB, colorA, } },
             };
             foreach (var pair in tangentModeMap)
             {
