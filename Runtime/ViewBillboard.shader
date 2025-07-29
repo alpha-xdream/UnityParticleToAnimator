@@ -6,10 +6,6 @@ Shader "ParticleToAnimator/ViewBillboard"
 		_MainTex ("Base (RGB)", 2D) = "white" {}		
 		_TintColor ("Tint Color", Color) = (1,1,1,1)
 		_Offset ("Offset", Vector) = (0.0, 0.0, 0.0, 0.0)
-
-		//UnityEngine.Rendering.BlendMode
-		[HideInInspector] _SrcBlend ("__src", Int) = 5.0
-		[HideInInspector] _DstBlend ("__dst", Int) = 10.0
 	}
 		
 	SubShader
@@ -21,7 +17,7 @@ Shader "ParticleToAnimator/ViewBillboard"
 		Lighting Off 
 		ZWrite Off 
 		AlphaTest Off
-		Blend [_SrcBlend] [_DstBlend]
+		Blend SrcAlpha OneMinusSrcAlpha
 
 		Pass
 		{		
