@@ -162,7 +162,7 @@ public partial class ParticleToAnimator : MonoBehaviour
             ps.Clear(false);
             ps.Play(false);
             ps.Pause(false);
-            duration = Mathf.Max(duration, ps.main.duration + ps.main.startLifetime.constantMax); // 还要加上粒子的生存时间
+            duration = Mathf.Max(duration, ps.main.duration + ps.main.startLifetime.GetMaxValue() + ps.main.startDelay.GetMaxValue()); // 还要加上粒子的生存时间
         }
 
         Debug.Log($"duration:{duration}");
